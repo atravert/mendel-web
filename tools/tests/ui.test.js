@@ -530,23 +530,25 @@ function unicodeFormula(formula) {
 
 check('le champ a le focus au debut', document.activeElement === input, true);
 {
-  // L'utilisateur a referme le clavier pour lire le retour: le champ a donc
-  // perdu le focus avant la validation. La question suivante ne doit pas le
-  // lui remettre sous le nez.
+  // Le clavier se referme d'un geste, ou parce qu'un autre bouton a pris le
+  // focus. Peu importe: la question suivante le rouvre, sans que le joueur ait
+  // a y revenir. Conditionner le refocus a l'etat du clavier rendait
+  // l'enchainement dependant d'un detail invisible.
   input.blur();
-  type(expectedAnswer(currentPrompt()) || 'x');
-  submit();
-  document.getElementById('next-button').fire('click');
-  check('un clavier volontairement referme ne se rouvre pas',
-    document.activeElement === input, false);
+  check('le champ a bien perdu le focus', document.activeElement === input, false);
 
-  // Le geste inverse: le joueur tape au clavier, le champ a le focus au
-  // moment de valider, et le clavier doit se rouvrir tout seul.
-  input.focus();
   type(expectedAnswer(currentPrompt()) || 'x');
   submit();
   document.getElementById('next-button').fire('click');
-  check('un clavier ouvert se rouvre a la question suivante',
+  check('le clavier se rouvre meme apres un blur',
+    document.activeElement === input, true);
+
+  // Idem apres un enchainement complet, ou le focus est passe par le bouton
+  // Suivant entre deux questions.
+  type(expectedAnswer(currentPrompt()) || 'x');
+  submit();
+  document.getElementById('next-button').fire('click');
+  check('le clavier se rouvre apres chaque question',
     document.activeElement === input, true);
 }
 

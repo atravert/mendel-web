@@ -31,7 +31,7 @@ Trois contrôles, tous exécutables sans rien installer :
 | Commande | Ce qu'elle fait |
 |---|---|
 | `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. |
-| `make test` | 250 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
+| `make test` | 251 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
 | `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
 
@@ -103,6 +103,16 @@ et redemande 820 Ko aux utilisateurs déjà installés. **Ne pas lancer
 Ces chiffres viennent d'un proxy (corrélation et rapport signal/bruit en
 large bande), pas d'un test d'écoute. **Le seul juge reste l'oreille**, sur
 un téléphone, à 25 % du volume. `make audio-ladder` rejoue la mesure.
+
+Le volume de *lecture* est une autre affaire, et il n'est mesurable par
+aucun proxy : `MUSIC_VOLUME` dans `js/audio.js`. La valeur de 0,25 reprise des
+natives s'est révélée trop forte — le thème passait devant tout et poussait à
+monter le volume de l'appareil, ce qui est l'inverse de l'effet recherché. Il
+est descendu à **0,08**, soit une dizaine de décibels sous les effets (0,8) :
+le rapport de 20 entre un fond et une information est l'écart habituel, et
+c'est ce qui fait que la musique reste un fond quand le téléphone est réglé à
+« moyen ». Si elle reste trop présente, ce n'est qu'une constante à changer,
+mais c'est le seul endroit où la régler.
 
 ---
 
@@ -205,13 +215,13 @@ Trois ajustements d'ergonomie, dans le même sens :
 - **Valider reste inactif tant que le champ est vide**, comme sur iOS. Sur
   Android, valider vide consommait un point.
 
-- **Plus de touche « clavier ».** Sa fonction était de fermer le clavier
-  virtuel pour accéder à la barre et au bouton Valider, et d'empêcher qu'il
-  se rouvre à chaque question. iOS et Android savent déjà le fermer d'un geste.
-  Le suivi a été repris sans bouton : `validate()` note si le champ avait le
-  focus — donc si le clavier était ouvert — et la question suivante ne le
-  rouvre que dans ce cas. Un clavier volontairement fermé pour lire le retour
-  n'est pas remis sous le nez.
+- **Plus de touche « clavier », et le clavier reste toujours ouvert.** Sa
+  fonction était de fermer le clavier virtuel pour accéder à la barre et au
+  bouton Valider, et d'empêcher qu'il se rouvre tout seul. iOS et Android
+  savent déjà le fermer d'un geste, et laisser le champ reprendre le focus à
+  chaque question est plus régulier : l'enchaînement ne dépend plus d'un
+  état qu'on ne voit pas, et le défilement ne saute plus d'une question à
+  l'autre.
 
 Les formules sont affichées avec de vrais `<sub>`/`<sup>` plutôt qu'avec les
 caractères Unicode de `prettyFormula` : le texte reste sélectionnable et se

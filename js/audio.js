@@ -13,7 +13,14 @@
 
 const STORAGE_KEY = 'mendel.sound';
 
-const MUSIC_VOLUME = 0.25;   // SoundManager: MUSIC_VOLUME
+// La musique est un fond, pas un morceau qu'on ecoute: elle tourne pendant
+// toute la session. A 0.25 elle prenait le dessus et poussait a monter le
+// volume de l'appareil, exactement l'effet contraire de celui qu'on cherche.
+// 0.08 la place une dizaine de decibels sous les effets (0.8, soit un rapport
+// de 20), ce qui est l'ecart habituel entre un fond et une information. Sur
+// un telephone regle a "moyen", elle doit s'entendre sans qu'on ait envie de
+// couper le son.
+const MUSIC_VOLUME = 0.08;
 const EFFECT_VOLUME = 0.8;   // SoundManager: EFFECT_VOLUME
 
 const CORRECT_SAMPLES = ['correct_01', 'correct_02', 'correct_03'];

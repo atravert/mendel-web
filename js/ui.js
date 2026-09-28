@@ -35,12 +35,6 @@ const state = {
   index: 0,
   score: 0,
   answered: false,
-  // Le clavier virtuel occupe la moitie de l'ecran et se referme des que le
-  // bouton "Suivant" prend le focus. Le rouvrir a chaque question est le geste
-  // attendu, mais pas si l'utilisateur l'a volontairement referme pour lire le
-  // retour. On note donc s'il etait ouvert au moment de valider, plutot que
-  // d'exposer un bouton de plus a tenir dans un etat.
-  reopenKeyboard: true,
   // 'sub', 'sup', ou null: mode arme par la touche d'indice ou d'exposant.
   // Reinitialise a chaque question, sinon un modearme par erreur
   // contaminerait la question suivante.
@@ -146,7 +140,11 @@ function renderQuestion() {
   el.symbolBar.hidden = !expectsFormula(question);
   setScript(null);
 
-  if (state.reopenKeyboard) el.input.focus();
+  // Le champ reprend le focus a chaque question, donc le clavier virtuel se
+  // rouvre tout seul. Le laisser tel quel obligerait a chaque enchainement a
+  // un aller-retour entre le clavier et le bouton Suivant, et la question
+  // suivante n'apparaitrait qu'apres: le defilement sautillait.
+  el.input.focus();
 }
 
 function renderFeedback(correct) {
@@ -188,7 +186,6 @@ function startQuiz(topicId) {
   state.index = 0;
   state.score = 0;
   state.answered = false;
-  state.reopenKeyboard = true;
   resetCommentHistory();
 
   sound.unlock();
@@ -211,13 +208,6 @@ function validate() {
   el.scoreText.textContent = `Score : ${state.score}`;
   el.input.disabled = true;
   el.validateButton.disabled = true;
-
-  // Le bouton Suivant vole le focus, ce qui ferme le clavier virtuel: on note
-  // donc avant, tant que le champ l'a encore. S'il l'a, il etait ouvert et se
-  // rouvrira a la question suivante. S'il ne l'a pas, c'est que l'utilisateur
-  // l'a referme pour lire le retour, et on respecte ce geste au lieu de lui
-  // remettre le clavier sous le nez.
-  state.reopenKeyboard = document.activeElement === el.input;
 
   if (correct) sound.playCorrect();
   else sound.playWrong();
