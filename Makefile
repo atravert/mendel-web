@@ -6,6 +6,8 @@
 #   make icons    regenere les icones PWA
 #   make audio    regenere le theme compresse (afconvert, livre avec macOS)
 #   make audio-levels  mesure le niveau de sortie du theme et des effets
+#   make online   le site publie sert-il la version locale ?
+#   make wait     idem, en repetant jusqu'a ce que le site suive
 #   make serve    sert le site sur http://localhost:8000
 
 PYTHON ?= python3
@@ -15,7 +17,7 @@ PROD_JS := js/data.js js/quiz.js js/audio.js js/ui.js sw.js
 TEST_JS := tools/tests/dom-stub.js tools/tests/quiz.test.js tools/tests/ui.test.js
 
 .PHONY: all check test verify syntax data icons audio audio-ladder \
-        audio-levels cache-version cache-check serve clean
+        audio-levels cache-version cache-check online wait serve clean
 
 all: check
 
@@ -33,9 +35,16 @@ check: syntax test verify cache-check
 
 # Analyse lexicale: detecte les chaines non fermees, les commentaires
 # infinites et les regex mal fermees. Remplace `node --check`, absent ici.
+#
+# Les scripts python sont compiles aussi, sans etre executes: un script de
+# verification qui ne compile pas ne peut pas signaler qu'il ne compile pas,
+# et l'oubli ne se voit qu'au moment ou l'on a besoin de lui. C'est arrive
+# avec `defComparer()` dans check-published.py, que rien n'avait attrape.
 syntax:
 	@echo "== syntaxe =="
 	@$(PYTHON) tools/check-js.py $(PROD_JS) $(TEST_JS)
+	@$(PYTHON) -m py_compile $(wildcard tools/*.py)
+	@echo "ok     outils python"
 
 test:
 	@echo ""
@@ -89,6 +98,20 @@ cache-version:
 # toucher au fichier.
 cache-check:
 	@$(PYTHON) tools/sync-cache-version.py --check
+
+# Le deploiement est-il arrive sur le site? `git push` ne repond pas a la
+# question: GitHub Pages republie en une a deux minutes, et ensuite l'appareil
+# a lui-meme deux lancements de retard. Sans cette etape, ces trois delais se
+# confondent en un seul symptome.
+#
+# Volontairement hors de `make check`: il demande le reseau, et une
+# verification de code ne doit pas en dependre.
+online:
+	@$(PYTHON) tools/check-published.py
+
+# Idem, en attendant la fin de la republication.
+wait:
+	@$(PYTHON) tools/check-published.py --watch
 
 # http://localhost:est un contexte secur, donc le service worker s'y installe
 # comme en production. Indispensable pour tester le hors-ligne.

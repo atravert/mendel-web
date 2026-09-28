@@ -34,6 +34,11 @@ Trois contrôles, tous exécutables sans rien installer :
 | `make test` | 266 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
 | `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS, ancrage du centrage, marge de l'indicateur d'accueil, chemins de confirmation, placement de l'icône du son. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
+| `make online` | Le site publié sert-il la version locale ? Demande le réseau. |
+
+Les quatre premiers n'utilisent que `python3` et le JavaScriptCore d'Apple. Le
+cinquième est volontairement **hors de `make`** : il demande le réseau, et une
+vérification de code ne doit pas en dépendre.
 
 Le harnais a deux extensions qui méritent d'être connues, parce qu'elles
 rendent testable ce qui ne l'était pas :
@@ -44,10 +49,12 @@ rendent testable ce qui ne l'était pas :
   sans faire défiler. Les relier l'un à l'autre — ce qu'un stub trop simple
   ferait — rendrait les deux variables redondantes, et une erreur de signe
   passerait.
-- **La propagation des événements.** `fire()` remonte le long des ancêtres.
-  Les parades anti-prise de focus sont enregistrées sur le conteneur et non
-  sur chaque bouton ; sans remontée elles ne seraient jamais appelées par un
-  test, et une parade vérifiée dans le vide n'est pas vérifiée.
+- **La propagation des événements.** `fire()` remonte le long des ancêtres,
+  jusqu'au `document`. Les parades anti-prise de focus sont enregistrées sur le
+  conteneur et non sur chaque bouton, et le filet de la touche retour écoute
+  le `document` ; sans remontée elles ne seraient jamais appelées par un test,
+  et une parade vérifiée dans le vide n'est pas vérifiée. Deux assertions
+  veillent à ce que le harnais voie ce que voit un navigateur.
 
 Et une absence, qui est une décision : **le harnais n'a aucune minuterie.**
 Jsc n'en fournit pas, et surtout on n'en simule pas. Un `setTimeout` dans
@@ -682,15 +689,30 @@ d'invalidation.
 
 ### Vérifier sur l'appareil
 
-Un `push` n'a pas d'effet immédiat : le premier lancement sert l'ancien cache,
-la mise à jour s'installe pendant, et le nouveau code tourne à la deuxième
-ouverture. Sur une connexion lente, les 820 Ko de précache peuvent demander un
-troisième lancement. Il ne faut pas réinstaller l'application.
+Un `push` n'a pas d'effet immédiat. **Trois délais** s'y interposent, et ils
+sont indépendants :
 
-Le numéro affiché en bas de l'écran d'accueil tranche immédiatement : il est
-écrit par le même outil que `CACHE_VERSION` et vérifié par `make verify`. S'il
-ne change pas après un déploiement, l'appareil sert encore l'ancien code, et le
-symptôme observé n'a rien à voir avec le correctif que l'on croit tester.
+| Délai | Durée | Comment le constater |
+|---|---|---|
+| GitHub Pages republie | 1 à 2 min | `make online` |
+| le navigateur du téléphone découvre le nouveau worker | 1er lancement | le numéro ne change pas |
+| le worker sert enfin le nouveau code | 2e lancement | le numéro change |
+
+`make online` compare la version locale à celle que le site sert réellement,
+en contournant le cache du CDN. `make wait` répète l'attente jusqu'à ce que le
+site suive.
+
+Il ne faut **pas réinstaller** l'application : le service worker est déjà en
+place, il suffit de lancer deux fois.
+
+Le numéro affiché en bas de l'écran d'accueil tranche le reste : il est écrit
+par le même outil que `CACHE_VERSION` et vérifié par `make verify`. S'il ne
+change pas après un `make online` au vert, l'appareil sert encore l'ancien code
+— et le symptôme observé n'a rien à voir avec le correctif que l'on croyait
+tester. C'est exactement ce qui est arrivé : l'icône et la touche retour
+étaient signalées comme cassées alors que la version précédente marchait
+déjà. Les deux produisaient la même image qu'un bug réel, et rien ne
+permettait de les distinguer sans ce numéro.
 
 Le seul piège qui subsiste est de modifier un fichier précaché et de pousser
 sans avoir lancé `make`. Le garde-fou est là pour le transformer en échec rouge
