@@ -41,6 +41,17 @@ var localStorage = window.localStorage;
 var fetch = window.fetch;
 var Audio = window.Audio;
 var location = window.location;
+
+// Jsc n'a pas de boucle d'evenement ni de setTimeout. On en fournit un qui
+// s'execute dans l'ordre, au vidage de la file: de quoi tester le focus
+// differe, dont depend l'ouverture du clavier virtuel sur iOS.
+var MENDEL_TIMERS = [];
+var setTimeout = function (fn) { MENDEL_TIMERS.push(fn); };
+function flushTimers() {
+  var pending = MENDEL_TIMERS;
+  MENDEL_TIMERS = [];
+  for (var i = 0; i < pending.length; i += 1) pending[i]();
+}
 """
 
 

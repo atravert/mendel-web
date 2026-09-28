@@ -492,12 +492,18 @@ def levels(theme=DEFAULT_THEME, sfx_dir="audio"):
         moyenne = sum(rms_list) / len(rms_list)
         ecart = moyenne + db(effect_volume) - (t_rms + db(music_volume))
         print("\n  ecart musique / effets : %.1f dB" % ecart)
+
+        # La plage 8-20 dB qu'on s'etait fixee vient d'un principe general
+        # (separer un fond d'une information), et l'oreille l'a refutee deux
+        # fois sur ce telephone: 13 dB et 18 dB, de musique, etaient « trop
+        # fort ». Un outil qui qualifie d'anormal un ecart que l'utilisateur a
+        # demande detruit l'information la plus precieuse qu'il ait -- a quel
+        # point on est deja trop fort. On se limite donc a des reperes.
         if ecart < 8:
-            print("    -> trop serre: le fond et l'information se confondent")
-        elif ecart > 20:
-            print("    -> trop ouvert: la musique devient inaudible au volume normal")
+            print("    -> repere : le fond et l'information se confondent")
         else:
-            print("    -> plage habituelle pour un fond (8 a 20 dB)")
+            print("    -> repere : au-dela de 20 dB le fond n'est plus qu'une")
+            print("       presence. C'est voulu ici, l'oreille l'ayant demande.")
 
         if clipping:
             print("\n  ATTENTION ecretage : %s" % ", ".join(clipping))

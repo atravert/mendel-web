@@ -19,19 +19,29 @@ const STORAGE_KEY = 'mendel.sound';
 // mais l'ecart de niveau REEL qu'elles produisent -- et il se mesure sur les
 // fichiers, pas sur les constantes elles-memes.
 //
-// Mesure (`make levels`): le theme est a -23,7 dBFS RMS, les effets a -11,3
-// en moyenne. Les sources sont deja a des niveaux voisins, il n'y a donc pas
-// de raison de les regler tres differemment. Un rapport de 20 entre les
+// Mesure (`make audio-levels`): le theme est a -23,7 dBFS RMS, les effets a
+// -11,3 en moyenne. Les sources sont deja a des niveaux voisins, il n'y a donc
+// pas de raison de les regler tres differemment. Un rapport de 20 entre les
 // constantes -- 0,08 contre 0,8 -- paraissait raisonnable et produisait 32 dB
 // reels: la musique etait inaudible, tandis que les effets sortaient a -1,9
 // dBFS de pic, presque a l'ecretage. Il fallait alors baisser le telephone
 // pour les effets et le remonter pour la musique. Aucun reglage ne convenait.
 //
-// D'ou les valeurs ci-dessous: on remonte la musique, on abaisse les effets.
-// L'ecart tombe a 13 dB, milieu de la plage 8-20 dB qui separe d'ordinaire
-// un fond d'une information, et aucun des deux flux n'approche l'ecretage.
-// Rejouer `make levels` apres toute modification de ces deux nombres.
-const MUSIC_VOLUME = 0.45;
+// Ensuite, deux essais a l'oreille, dans l'autre sens, qui disent la meme
+// chose: 0,45 puis 0,25 de musique, toujours « trop fort ». L'ecart reels passe
+// de 13 a 18 dB, puis 22, et la musique domine encore. Ces deux bornes valent
+// mieux que la plage 8-20 dB qu'on s'etait fixee: elle venait d'un principe
+// general, alors que 0,45 et 0,25 sont des verites d'oreille, mesurees sur ce
+// telephone. D'ou 0,15: la musique descend sous le seuil d'audition courante
+// de l'oreille, et ne subsiste plus que comme une presence de fond -- ce qui
+// est le role du theme. L'effet garde 0,5, dont le pic a -6 dBFS est sain:
+// l'ecart qui le separerait de la musique est tel qu'il faudrait baisser le
+// telephone pour l'entendre.
+//
+// Rejouer `make audio-levels` apres toute modification de ces deux nombres. Si
+// ce reglage ne convient toujours pas, la suite n'est pas un nouveau tirage au
+// sort: c'est un bouton de volume dans l'application.
+const MUSIC_VOLUME = 0.15;
 const EFFECT_VOLUME = 0.5;   // ramene les pics a -6 dBFS: plus d'ecretage a la lecture
 
 const CORRECT_SAMPLES = ['correct_01', 'correct_02', 'correct_03'];

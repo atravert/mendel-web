@@ -26,6 +26,62 @@ import {
 import * as sound from './audio.js';
 
 // ---------------------------------------------------------------------------
+// Hauteur reellement disponible
+// ---------------------------------------------------------------------------
+
+/**
+ * La hauteur utile n'est pas celle du viewport de mise en page: c'est celle
+ * que le clavier virtuel laisse.
+ *
+ * Le viewport est le piege de cette application. Deux mecanismes distincts
+ * coexistent:
+ *
+ *   - `interactive-widget=resizes-content` (dans la balise viewport) ne vaut
+ *     QUE sur Chrome. Le viewport de mise en page y est retreci des que le
+ *     clavier s'ouvre, et `100dvh` suit.
+ *   - Sur iOS, ce parametre n'existe pas. Le viewport de mise en page garde
+ *     sa hauteur, et c'est le document qui defile pour montrer le champ. Or le
+ *     contenu est centre verticalement dans la hauteur PLEINE de l'ecran:
+ *     quand le clavier monte, sa moitie basse empiete sur le contenu, et le
+ *     bouton Valider se retrouve hors de l'ecran. C'est exactement le
+ *     defilement saccade que la demande d'un clavier toujours ouvert cherchait
+ *     a supprimer.
+ *
+ * `visualViewport` est la seule mesure fiable sur les deux systemes, et sa
+ * `height` suffit: c'est la hauteur reellement visible, celle que le contenu
+ * doit se partager.
+ *
+ * Son `offsetTop`, en revanche, n'est pas publie, et l'omission est deliberee.
+ * Rattraper le defilement d'iOS paraissait le complement naturel, et il est
+ * surtout dangereux:
+ *
+ *   - quand le contenu tient dans la hauteur visible, le document est plus
+ *     court que le viewport de mise en page. Il ne defile pas, `offsetTop`
+ *     vaut 0, et le decalage ne fait rien;
+ *   - quand le contenu deborde -- 503 px de contenu pour 407 px visibles sur
+ *     un iPhone SE -- le defilement du document est le seul moyen
+ *     d'atteindre ce qui manque. L'annuler le rendrait inatteignable, sans
+ *     rien gagner au passage.
+ *
+ * Le defilement reste donc celui du navigateur, et la feuille de style fait
+ * deborder .screen lui-meme, ou le contenu reste entierement atteignable.
+ */
+function syncViewport() {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  document.documentElement.style.setProperty(
+    '--app-height', viewport.height + 'px');
+}
+
+// Le scroll est ecoute avec le resize: sur iOS le deplacement de la barre
+// d'adresse retrecit le viewport sans emettre de `resize`.
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncViewport);
+  window.visualViewport.addEventListener('scroll', syncViewport);
+  syncViewport();
+}
+
+// ---------------------------------------------------------------------------
 // Etat
 // ---------------------------------------------------------------------------
 
@@ -139,12 +195,35 @@ function renderQuestion() {
 
   el.symbolBar.hidden = !expectsFormula(question);
   setScript(null);
+  focusInput();
+}
 
-  // Le champ reprend le focus a chaque question, donc le clavier virtuel se
-  // rouvre tout seul. Le laisser tel quel obligerait a chaque enchainement a
-  // un aller-retour entre le clavier et le bouton Suivant, et la question
-  // suivante n'apparaitrait qu'apres: le defilement sautillait.
-  el.input.focus();
+/**
+ * Le champ doit reprendre le focus a chaque question pour que le clavier
+ * virtuel reste ouvert. C'est differe d'un tick, et ce n'est pas un detail:
+ *
+ *   - sur iOS, un `focus()` synchrone appele dans la meme tache que le
+ *     `disabled = false` qui vient de reactiver le champ n'ouvre pas le
+ *     clavier. Le champ est focusable, mais iOS considere qu'aucun geste
+ *     utilisateur n'a demande le clavier, donc il ne le leve pas. Passer a la
+ *     tache suivante suffit a lever ce refus, et c'est le seul remede
+ *     connu de ce symptome;
+ *   - le differe laisse aussi le navigateur appliquer le nouveau texte et le
+ *     placeholder avant de deplacer le curseur, sinon le scroll revient sur
+ *     la position de la question precedente.
+ *
+ * `focusSequence` evite l'effet papillon: si l'ecran change avant le
+ * callback -- validation puis retour immediat -- on ne ravive pas un clavier
+ * sur une question qui n'est plus a l'ecran.
+ */
+let focusSequence = 0;
+
+function focusInput() {
+  focusSequence += 1;
+  const mine = focusSequence;
+  setTimeout(() => {
+    if (mine === focusSequence) el.input.focus();
+  }, 0);
 }
 
 function renderFeedback(correct) {

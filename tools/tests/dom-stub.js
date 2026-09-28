@@ -24,6 +24,14 @@ function makeElement(tag, id, doc) {
     className: '',
     value: '',
     disabled: false,
+    // Variables CSS posees par ui.js depuis visualViewport: le stub n'a pas de
+    // moteur de rendu, mais il doit pouvoir les lire, sinon le code de
+    // synchronisation serait teste en silence, donc jamais verifie.
+    style: {
+      _props: {},
+      setProperty(name, value) { this._props[name] = value; },
+      getPropertyValue(name) { return this._props[name] || ''; },
+    },
     placeholder: '',
     dataset: {},
     attrs: {},
@@ -178,7 +186,51 @@ function createDocument(html, topicIds) {
     };
   }
 
+  // `documentElement` recoit les variables CSS de ui.js. Sans lui,
+  // syncViewport() echouerait et le chemin le plus fragile de l'application
+  // -- celui qui depend du comportement reel du clavier -- resterait non teste.
+  doc.documentElement = makeElement('html', '', doc);
+
   return doc;
+}
+
+/**
+ * Faux `visualViewport` pilotable: `setKeyboard(height)` simule l'ouverture du
+ * clavier, `hideKeyboard()` sa fermeture, et l'evenement `resize` est emis
+ * comme le ferait un vrai navigateur.
+ */
+function createViewport(doc) {
+  const viewport = {
+    width: 390,
+    height: 844,
+    offsetTop: 0,
+    _listeners: { resize: [], scroll: [] },
+    addEventListener(type, fn) {
+      (this._listeners[type] = this._listeners[type] || []).push(fn);
+    },
+    /**
+     * Ouvre le clavier: seule la HAUTEUR visible diminue. Le decalage reste
+     * independant, parce qu'il l'est en reel: iOS peut lever le clavier sans
+     * faire defiler (offsetTop nul), ou faire defiler d'autant (offsetTop
+     * egal a la hauteur perdue). Relier les deux -- comme un stub trop
+     * simple le ferait -- rendrait `height` et `offsetTop` redondants, et
+     * `--app-height` indiscutable: une erreur de signe passerait.
+     */
+    setKeyboard(height) {
+      this.height = height;
+      for (const fn of this._listeners.resize) fn({ type: 'resize' });
+    },
+    hideKeyboard() {
+      this.height = 844;
+      for (const fn of this._listeners.resize) fn({ type: 'resize' });
+    },
+    /** Fait defiler le document de `top` pixels sous le clavier. */
+    scrollTo(top) {
+      this.offsetTop = top;
+      for (const fn of this._listeners.scroll) fn({ type: 'scroll' });
+    },
+  };
+  return viewport;
 }
 
 /** References pratiques, posees par createDocument avant le chargement de ui.js. */
@@ -203,6 +255,7 @@ function wireDom(doc) {
 function createWindow(doc) {
   return {
     document: doc,
+    visualViewport: createViewport(doc),
     navigator: {
       userAgent: 'stub',
       platform: 'MacIntel',

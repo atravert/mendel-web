@@ -228,6 +228,70 @@ def check_symbol_bar(errors):
     return len(expected["insert"]) + len(expected["script"])
 
 
+def check_viewport(errors):
+    """Les variables CSS publiees par ui.js doivent etre consommees par style.css.
+
+    Le contrat passe par des noms de variables: ui.js ecrit `--app-height`,
+    style.css la lit. Aucun test ne voit le CSS, donc renommer d'un cote laisse
+    la suite verte et la mise en page cassee en silence. On verifie que les
+    deux noms se repondent, et qu'un repli subsiste pour le cas ou le JS n'a
+    pas tourne -- sans quoi la page vaut zero pixel de haut au premier rendu.
+    """
+    src = strip_comments(read("js/ui.js"))
+    css = strip_comments(read("css/style.css"))
+
+    # \s, et non un espace: l'appel est reparti sur deux lignes, et une
+    # regexp trop etroite le ferait disparaitre du compte.
+    published = set(re.findall(r"setProperty\(\s*'(--[\w-]+)'", src))
+    used = set(re.findall(r"var\((--[\w-]+)", css))
+
+    count = 0
+    for name in sorted(published):
+        count += 1
+        if name not in used:
+            errors.append("style.css: %s publie par ui.js n'est consomme par aucune "
+                          "regle" % name)
+    for name in sorted(used - published):
+        if name.startswith("--app-"):
+            errors.append("style.css: %s consommee mais jamais publiee par ui.js" % name)
+            count += 1
+
+    # Sans repli, le premier rendu precede l'appel a syncViewport() -- donc une
+    # page sans hauteur du tout, le temps que le script s'execute.
+    for name in sorted(published):
+        block = re.search(r"var\(%s,\s*([^)]+)\)" % re.escape(name), css)
+        if not block or not block.group(1).strip():
+            errors.append("style.css: %s n'a pas de valeur de repli" % name)
+    return count
+
+
+def check_centering(errors):
+    """`.screen` ne doit pas centrer par `justify-content`, mais par marges.
+
+    Les deux centrent. Un seul rend le debordement atteignable. Avec
+    `justify-content: center`, un contenu plus grand que la boite est centre
+    quand meme: le haut sort du cadre, et aucun defilement n'y conduit plus.
+    C'est invisible sans telephone, et le contenu deborde reellement des que
+    le clavier est ouvert sur un petit ecran (503 px de contenu pour 407 px
+    visibles sur un iPhone SE).
+    """
+    css = strip_comments(read("css/style.css"))
+    block = re.search(r"^\.screen\s*\{(.*?)^\}", css, re.S | re.M)
+    if not block:
+        errors.append("style.css: regle .screen introuvable")
+        return 0
+
+    body = block.group(1)
+    if re.search(r"justify-content\s*:\s*[^;]*\bcenter\b", body):
+        errors.append("style.css: .screen centre par justify-content: le contenu "
+                      "trop grand devient inatteignable. Utiliser les marges "
+                      "automatiques du premier et du dernier enfant.")
+    for edge in ("margin-block-start: auto", "margin-block-end: auto"):
+        if edge not in css:
+            errors.append("style.css: .screen n'a pas `%s`, il ne sera plus centre" % edge)
+    return 1
+
+
 def main():
     errors = []
     precache = check_precache(errors)
@@ -237,6 +301,8 @@ def main():
     audio_refs = check_assets_referenced_by_code(errors)
     dom, missing_dom = check_dom_ids(errors)
     bar = check_symbol_bar(errors)
+    viewport = check_viewport(errors)
+    centering = check_centering(errors)
 
     print("precache service worker : %d entrees" % precache)
     print("references dans HTML    : %d" % html_refs)
@@ -245,6 +311,8 @@ def main():
     print("chemins audio dans le JS: %d" % audio_refs)
     print("ids DOM utilises par ui : %d" % dom)
     print("touches barre vs stub   : %d" % bar)
+    print("variables viewport CSS  : %d" % viewport)
+    print("centrage de .screen     : %d" % centering)
 
     if errors:
         print()

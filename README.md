@@ -31,9 +31,22 @@ Trois contrôles, tous exécutables sans rien installer :
 | Commande | Ce qu'elle fait |
 |---|---|
 | `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. |
-| `make test` | 251 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
-| `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM. |
+| `make test` | 261 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
+| `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
+
+Le harnais a deux extensions qui méritent d'être connues, parce qu'elles
+rendent testable ce qui ne l'était pas :
+
+- **`setTimeout` et `flushTimers()`.** Jsc n'a pas de boucle d'événements. Le
+  focus reporté d'un tick — dont dépend l'ouverture du clavier sur iOS — était
+  donc injouable, et le test aurait dû contourner le code testé pour passer.
+- **`visualViewport` pilotable.** `setKeyboard`, `hideKeyboard` et `scrollTo`
+  rejouent l'ouverture du clavier et le défilement du document. La hauteur et
+  le décalage y sont **indépendants**, comme en réel : iOS peut lever le clavier
+  sans faire défiler. Les relier l'un à l'autre — ce qu'un stub trop simple
+  ferait — rendrait les deux variables redondantes, et une erreur de signe
+  passerait.
 
 ## Régénérer
 
@@ -121,17 +134,38 @@ avait donc aucune raison de les régler vingt fois différemment. Un rapport de
 pour les effets et le remonter pour la musique — aucun réglage ne convenait,
 ce qui est exactement le symptôme décrit.
 
-| | avant (0,08 / 0,8) | après (0,45 / 0,5) |
-|---|---|---|
-| thème, RMS lu | −45,6 dBFS | **−30,6 dBFS** |
-| effets, RMS lu | −13,2 dBFS | **−17,3 dBFS** |
-| effets, pic lu | −1,9 dBFS | **−6,0 dBFS** |
-| écart musique / effets | 32,3 dB (inutilisable) | **13,3 dB** |
+| | avant (0,08 / 0,8) | 0,45 / 0,5 | **0,15 / 0,5** |
+|---|---|---|---|
+| thème, RMS lu | −45,6 dBFS | −30,6 dBFS | **−40,2 dBFS** |
+| effets, RMS lu | −13,2 dBFS | −17,3 dBFS | **−17,3 dBFS** |
+| effets, pic lu | −1,9 dBFS | −6,0 dBFS | **−6,0 dBFS** |
+| écart musique / effets | 32,3 dB (inutilisable) | 13,3 dB | **22,8 dB** |
+| verdict à l'oreille | musique absente | « encore trop fort » | à écouter |
 
-La musique remonte de 15 dB — audible à volume normal, sans toucher au
-téléphone — et les effets descendent de 4 dB, ce qui les sort de
-l'écrêtage. L'écart de 13 dB est au milieu de la plage 8–20 dB qui sépare
-d'ordinaire un fond d'une information.
+La mesure avait changé le diagnostic, mais elle ne suffisait pas : elle
+expliquait pourquoi 0,08 / 0,8 ne marchait pas, elle ne pouvait pas dire à quel
+niveau écouter. C'est l'oreille qui l'a dit, deux fois, dans le même sens —
+0,45 puis 0,25 étaient encore « trop fort ». Ces deux bornes valent mieux que la
+plage 8–20 dB qu'on s'était fixée au passage : elle sortait d'un principe
+général (séparer un fond d'une information), alors que 0,45 et 0,25 sont des
+vérités d'oreille, mesurées sur ce téléphone. **0,15** en découle : la musique
+passe sous le seuil d'audition courante de l'oreille et ne subsiste plus que
+comme une présence de fond, ce qui est le rôle d'un thème. L'écart de 22,8 dB
+sort donc de la plage qu'on s'était donnée, volontairement.
+
+`make audio-levels` ne qualifie plus cet écart d'anormal : un outil qui
+qualifie d'anormal un écart que vous avez demandé de dépasser détruit la seule
+information qui compte, à quel point on est déjà trop fort. Il se contente
+d'afficher la mesure.
+
+Les effets restent à 0,5 : leur pic à −6 dBFS est sain, et l'écart qui les
+séparerait de la musique est tel qu'il faudrait baisser le téléphone pour les
+entendre — ce qui est la seule chose que la demande interdit.
+
+**Si ce réglage ne convient toujours pas, la suite n'est pas un nouveau tirage
+au sort** : c'est un bouton de volume dans l'application, mémorisé comme le
+réglage du son. Trois essais à l'oreille suffisent à prouver qu'une constante
+n'est pas la bonne façon de régler un volume que l'utilisateur entend.
 
 Deux réserves, mesurées et non corrigées :
 
@@ -142,13 +176,80 @@ Deux réserves, mesurées et non corrigées :
   modifie pas.
 - **Le thème se termine par un fondu de 4,5 s, sans fondu de tête.** En
   boucle, le fond disparaît 4 s toutes les 104 s. L'oreille le perçoit comme un
-  son irrégulier plutôt que comme une coupure, ce qui est exactement le genre
-  de défaut qu'elle remarque sans pouvoir le nommer. Le corriger suppose de
+  son irrégulier plutôt qu'une coupure, ce qui est exactement le genre de
+  défaut qu'elle remarque sans pouvoir le nommer. Le corriger suppose de
   rogner la queue dans le `.m4a`, donc de refaire un fichier de 820 Ko : on
   vous le fera faire exprès, parce que le README le demande.
 
 ---
 
+## Le clavier virtuel
+
+« Le clavier reste toujours ouvert » est la demande qui a demandé le plus de
+travail, et la moins visible : rien à l'écran ne montre si elle est tenue. Les
+obstacles sont propres aux mobiles, aucun n'apparaît dans le code, et aucun ne
+se verrait sur un écran de bureau.
+
+**1. iOS n'ouvre pas le clavier sur un `focus()` synchrone.** Le champ est
+réactivé (`disabled = false`) puis focalisé dans la même tâche ; iOS considère
+qu'aucun geste utilisateur n'a demandé le clavier et ne le lève pas. Le champ
+est focusable, le curseur y va, et rien ne s'affiche. Le focus est donc reporté
+d'un tick — la seule parade connue à ce refus. Un jeton (`focusSequence`)
+invalide le report quand l'écran a changé entre-temps, pour ne pas lever un
+clavier sur une question qui n'est plus affichée.
+
+**2. `interactive-widget=resizes-content` ne vaut que sur Chrome.** Sur iOS, le
+viewport de mise en page **ne se rétrécit pas** quand le clavier monte. Le
+contenu, centré verticalement dans la hauteur *pleine* de l'écran, se retrouve
+donc à mi-hauteur du clavier, qui recouvre sa moitié basse : le bouton Valider
+sort de l'écran. `syncViewport()` publie `visualViewport.height` en
+`--app-height`, et `.shell` se dimensionne dessus. Un repli `100dvh` subsiste,
+pour le premier rendu, qui précède l'exécution du script.
+
+**3. Le centrage rendait le débordement inatteignable.** Corriger la hauteur
+suffisait sur les grands écrans, et révélait un troisième problème, mesuré :
+le contenu fait **503 px** (marge et encoches 40 + 59 + 34, quatre intervalles
+de 16, progression 22, type 20, énoncé 53 sur une seule ligne, champ 48, barre
+104, marge 12, bouton 48). L'iPhone 15 laisse 508 px une fois le clavier
+ouvert : 4 px de marge, juste. Un iPhone SE n'en laisse que 407 — **96 px de
+débordement**.
+
+Or `.screen` centrait par `justify-content: center`, qui centre *aussi* un
+contenu trop grand : le haut sortait du cadre sans qu'aucun défilement n'y
+mène. Le centrage passe donc par des marges automatiques sur le premier et le
+dernier enfant, qui se réduisent à zéro dès que ça déborde, plus
+`overflow-y: auto`. Le contenu reste alors entierement atteignable.
+
+**Ce qu'on a délibérément refusé de faire.** Rattraper le défilement d'iOS
+(`visualViewport.offsetTop`, en `position: relative`) semblait le complément
+naturel de `--app-height`. C'était surtout dangereux, et le calcul le montre
+en deux cas :
+
+- quand le contenu tient, le document est plus court que le viewport de mise
+  en page : il ne défile pas, `offsetTop` vaut 0, le décalage ne fait rien ;
+- quand il déborde, le défilement du document est le **seul** moyen
+  d'atteindre la fin — l'annuler la rendrait inatteignable, sans rien gagner
+  au passage.
+
+Le décalage n'était donc utile que lorsqu'il ne pouvait rien, et nuisible
+lorsqu'il pouvait quelque chose. Un test verrouille ce refus, pour qu'on ne le
+réintroduise pas en croyant bien faire.
+
+Les trois se vérifient sans téléphone. Le stub DOM expose un `visualViewport`
+pilotable (`setKeyboard`, `hideKeyboard`, `scrollTo`) et un `documentElement`
+qui enregistre les variables, et `js/ui.js` s'exécute réellement dans les tests
+— sinon le chemin le plus fragile de l'application resterait non testé, ce
+qu'est le risque classique d'un test qui s'exécute dans le vide.
+
+`make verify` couvre en outre ce que ces tests ne peuvent pas voir :
+
+- les noms publiés par le JS et consommés par le CSS **se répondent**, et
+  gardent une valeur de repli. Ces noms n'existent que dans ces deux fichiers :
+  un renommage d'un seul côté laisserait la suite verte et la mise en page
+  cassée ;
+- `.screen` ne centre pas par `justify-content`, et garde ses marges
+  automatiques. Aucun test ne peut détecter la différence sur un contenu trop
+  grand, et c'est précisément le cas réel sur un petit écran.
 ## Structure
 
 ```
@@ -256,6 +357,10 @@ Trois ajustements d'ergonomie, dans le même sens :
   état qu'on ne voit pas, et le défilement ne saute plus d'une question à
   l'autre.
 
+  Rester ouvert se heurte à deux obstacles propres aux mobiles, tous deux
+  traités, et tous deux vérifiables sans téléphone — voir
+  [Le clavier virtuel](#le-clavier-virtuel) plus bas.
+
 Les formules sont affichées avec de vrais `<sub>`/`<sup>` plutôt qu'avec les
 caractères Unicode de `prettyFormula` : le texte reste sélectionnable et se
 copie correctement, et la mise en forme est nette.
@@ -324,6 +429,14 @@ garde-fous, navigation, barre de symboles — mais **ni la mise en page, ni le
 clavier réel, ni le son, ni le service worker** ne sont vérifiés
 automatiquement. Ces points sont à confirmer à la main sur un téléphone.
 
+Ce que le simuleur de `visualViewport` **ne** couvre pas, et qu'il faut donc
+regarder sur l'appareil : le comportement réel d'iOS — le refus de lever le
+clavier sur un `focus()` différé d'un tick, et la valeur exacte de
+`offsetTop` pendant le défilement. Le simulateur garantit que le code mesure,
+réagit et publie correctement ; il ne peut pas garantir que le système
+d'exploitation se comporte comme le suppose le commentaire. C'est la limite
+qui reste, et elle ne se lève qu'avec un téléphone.
+
 `tools/check-js.py` est un analyseur lexical, pas un parseur. Il distingue
 regex et division par heuristique sur le caractère précédent : il peut se
 tromper sur du JavaScript exotique, ce qui n'apparaît pas ici.
@@ -333,3 +446,14 @@ main : c'est un miroir maintenance de `index.html`, donc une source de dérive.
 `tools/verify.py` compare les deux listes — contenu **et** ordre — et échoue si
 elles divergent, pour que les tests ne puissent pas passer sur une barre qui
 n'existe pas à l'écran.
+
+Et `tools/verify.py` couvre les deux autres contrats qu'aucun test JS ne peut
+voir, parce qu'ils sont écrits dans un autre langage :
+
+- `--app-height` est un nom partagé entre `js/ui.js` et `css/style.css`, et
+  aucun test ne le voit. `make verify` vérifie qu'il est publié d'un côté,
+  consommé de l'autre, et qu'il garde une valeur de repli — sans quoi la page
+  vaudrait zéro pixel de haut pendant le premier rendu.
+- `.screen` ne centre pas par `justify-content` et garde ses marges
+  automatiques. Les deux centrent ; un seul rend le débordement atteignable.
+

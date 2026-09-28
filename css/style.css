@@ -69,11 +69,29 @@ body {
 .shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  /* 100dvh suit la hauteur reelle quand le clavier virtuel s'ouvre, ce que
-     100vh ne fait pas: c'est ce qui evite d'avoir a faire defiler la page
-     pour atteindre le bouton Valider. */
+
+  /* Hauteur utile, publiee par syncViewport() dans js/ui.js.
+     Repli 100dvh, qui suffit sur Chrome: `interactive-widget=resizes-content`
+     y retrecit le viewport de mise en page, et dvh suit. Sur iOS ce parametre
+     n'existe pas, dvh garde la hauteur de l'ecran, et le contenu centre
+     descend a moitie sous le clavier: c'est ce que --app-height corrige.
+     L'ordre compte, le second ecrasant le premier. */
   min-height: 100dvh;
+  min-height: var(--app-height, 100dvh);
+
+  /* Aucun decalage n'est applique, et c'est un choix calcule, pas un oubli.
+
+     Rattraper le defilement d'iOS (visualViewport.offsetTop) semblait
+     correct, et ne l'est pas. Quand le contenu tient dans la hauteur visible, le
+     document est plus court que le viewport de mise en page: il ne defile
+     pas, offsetTop vaut 0, le decalage est inactif. Quand le contenu deborde,
+     le defilement du document est le SEUL moyen d'atteindre ce qui manque --
+     et l'annuler le rendrait inatteignable. Le decalage etait donc inutile
+     quand il ne pouvait rien, et empechant quand il pouvait quelque chose.
+
+     Le defilement reste celui du navigateur, et .screen defile lui-meme quand
+     c'est necessaire (voir plus bas). */
+
   padding:
     calc(var(--pad) + env(safe-area-inset-top))
     calc(var(--pad) + env(safe-area-inset-right))
@@ -86,10 +104,35 @@ body {
   flex-direction: column;
   flex: 1;
   gap: var(--gap);
+
   /* Les trois ecrans se partagent la hauteur, pour que le bouton de bas
-     reste au meme endroit quelle que soit l'etape. */
-  justify-content: center;
+     reste au meme endroit quelle que soit l'etape.
+
+     Le centrage se fait par marges automatiques sur le premier et le dernier
+     enfant, et non par `justify-content: center`. La difference n'a rien de
+     cosmetique: `justify-content: center` CENTRE AUSSI un contenu trop grand,
+     et la moitie haute part hors de la boite sans qu'aucun defilement n'y
+     mene. Les marges automatiques, elles, se reduisent a zero des que le
+     contenu deborde, et le contenu commence alors en haut -- atteignable.
+
+     C'est le cas reel ici. Budget vertical de l'ecran quiz, tout en
+     min-heurs du CSS: 20+20 de marge, 59 d'encoche, 34 d'indicateur, 4
+     intervalles de 16, 22 de progression, 20 de type, 53 d'enonce (une seule
+     ligne, les enonces etant des symboles et des formules), 48 de champ,
+     104 de barre, 12 de marge, 48 de bouton: 503 px. L'iPhone 15 laisse
+     508 px une fois le clavier ouvert, donc 4 px de marge -- juste. Un iPhone
+     SE n'en laisse que 407: 96 px de debordement.
+
+     `overflow-y: auto` rend ce debordement atteignable plutot que tronque. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+
+/* Auto-marges: l'espace libre va au debut et a la fin, donc le contenu est
+   centre; et quand il n'y a pas d'espace libre, elles valent zero et le
+   contenu demarre en haut. */
+.screen > :first-child { margin-block-start: auto; }
+.screen > :last-child { margin-block-end: auto; }
 
 /* --------------------------------------------------------------------------
    Bouton son, toujours en haut a droite, comme sur les deux natives

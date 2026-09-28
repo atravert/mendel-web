@@ -520,6 +520,7 @@ function unicodeFormula(formula) {
   // On enchaîne: valider donne le focus au bouton Suivant, ce qui ferme le
   // clavier virtuel, et la question suivante doit le rouvrir.
   document.getElementById('next-button').fire('click');
+  flushTimers();
   check('le champ reprend le focus a la question suivante',
     document.activeElement === input, true);
 }
@@ -528,6 +529,7 @@ function unicodeFormula(formula) {
 // Clavier virtuel
 // ---------------------------------------------------------------------------
 
+flushTimers();
 check('le champ a le focus au debut', document.activeElement === input, true);
 {
   // Le clavier se referme d'un geste, ou parce qu'un autre bouton a pris le
@@ -540,6 +542,7 @@ check('le champ a le focus au debut', document.activeElement === input, true);
   type(expectedAnswer(currentPrompt()) || 'x');
   submit();
   document.getElementById('next-button').fire('click');
+  flushTimers();
   check('le clavier se rouvre meme apres un blur',
     document.activeElement === input, true);
 
@@ -548,8 +551,87 @@ check('le champ a le focus au debut', document.activeElement === input, true);
   type(expectedAnswer(currentPrompt()) || 'x');
   submit();
   document.getElementById('next-button').fire('click');
+  flushTimers();
   check('le clavier se rouvre apres chaque question',
     document.activeElement === input, true);
+}
+
+// ---------------------------------------------------------------------------
+// Hauteur reellement visible
+// ---------------------------------------------------------------------------
+
+// Le point dur de cette application. `interactive-widget=resizes-content` ne
+// vaut que sur Chrome; sur iOS le viewport de mise en page ne bouge pas et
+// c'est le document qui defile, ce qui envoie la partie haute de l'ecran hors
+// du champ de vision et pousse le bouton Valider sous le bord. Ces assertions
+// verifient que la hauteur utile publiee suit bien le clavier, et qu'elle est
+// publee au bon moment.
+{
+  const viewport = window.visualViewport;
+  const root = document.documentElement;
+  const cssVar = (name) => root.style.getPropertyValue(name);
+
+  // Au repos: la hauteur de l'ecran entier.
+  check('au repos, la hauteur vaut celle de l\'ecran', cssVar('--app-height'), '844px');
+
+  // Clavier ouvert sur un iPhone 15: il reste ~508 px, la ou le centrage se
+  // faisait sur 844. Sans ca, la moitie basse du contenu etait sous le
+  // clavier et le bouton Valider sortait de l'ecran.
+  viewport.setKeyboard(508);
+  check('clavier ouvert, la hauteur diminue', cssVar('--app-height'), '508px');
+
+  // Le decalage d'iOS n'est PAS publie, et c'est une decision: quand le
+  // contenu deborde, le defilement du document est le seul moyen
+  // d'atteindre la fin. L'annuler la rendrait inatteignable. Ce test
+  // verrouille ce choix: le remettre casserait l'ecran le plus petit.
+  viewport.scrollTo(336);
+  check('le decalage d\'iOS ne touche pas a la hauteur', cssVar('--app-height'), '508px');
+  check('aucun decalage n\'est publie', root.style._props['--app-offset'], undefined);
+
+  // Referme: on doit retrouver la hauteur de l'ecran, sinon la page reste
+  // raccourcie apres le passage du clavier.
+  viewport.hideKeyboard();
+  check('clavier referme, la hauteur revient', cssVar('--app-height'), '844px');
+
+  // Le focus differe doit suivre: une question posee alors que le clavier est
+  // deja ouvert doit le laisser ouvert.
+  viewport.setKeyboard(508);
+  input.blur();
+  type(expectedAnswer(currentPrompt()) || 'x');
+  submit();
+  document.getElementById('next-button').fire('click');
+  flushTimers();
+  check('le focus differe fonctionne clavier ouvert',
+    document.activeElement === input, true);
+  check('la hauteur suit toujours le clavier', cssVar('--app-height'), '508px');
+
+  viewport.hideKeyboard();
+}
+
+// ---------------------------------------------------------------------------
+// Le differe de focus ne doit pas raviver un clavier sur l'ecran suivant
+// ---------------------------------------------------------------------------
+
+{
+  // Deux questions d'affilee: le jeton doit invalider le focus de la premiere
+  // au profit de celui de la seconde, sinon un clavier se leve sur un ecran
+  // qui n'est plus celui du quiz.
+  input.blur();
+  type(expectedAnswer(currentPrompt()) || 'x');
+  submit();
+  document.getElementById('next-button').fire('click');
+  input.blur();
+  type(expectedAnswer(currentPrompt()) || 'x');
+  submit();
+  document.getElementById('next-button').fire('click');
+  check('le focus n\'est pas encore pris avant le vidage',
+    document.activeElement === input, false);
+
+  const avant = input.focused;
+  flushTimers();
+  check('un seul focus survit a deux questions enchainees',
+    input.focused - avant, 1);
+  check('le champ est bien focus au final', document.activeElement === input, true);
 }
 
 // ---------------------------------------------------------------------------
