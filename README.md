@@ -31,7 +31,7 @@ Trois contrôles, tous exécutables sans rien installer :
 | Commande | Ce qu'elle fait |
 |---|---|
 | `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. |
-| `make test` | 240 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
+| `make test` | 250 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
 | `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
 
@@ -167,21 +167,29 @@ autorité. Corrigé dans `tools/extract-data.py`.
 
 Trois ajustements d'ergonomie, dans le même sens :
 
-- **Barre de symboles** quand la réponse attendue est une formule. Deux
-  touches à *mode armé* — indice et exposant, dessinées en `123` en petit
-  caractères — remplacent `^`, qui n'est pas atteignable au doigt :
+- **Barre de symboles** quand la réponse attendue est une formule, sur deux
+  rangees. Les deux premières touches sont à *mode armé* — indice et exposant,
+  dessinées en `123` en petit caractères — et remplacent `^`, qui n'est pas
+  atteignable au doigt :
 
   | Touche | Effet |
   |---|---|
   | `₁₂₃` indice | la frappe suivante produit un indice : `4` devient `₄` |
   | `¹²³` exposant | la frappe suivante produit un exposant : `2` devient `²` |
-  | `+` `-` `(` `)` | insérés tels quels, au curseur |
+  | `+` `-` `(` `)` | insérés au curseur, `+` et `-`honorent le mode armé |
+  | `0` … `9` | tapés directement, ou en indice/exposant si un mode est armé |
 
   Le mode tient sur un chiffre, un `+` ou un `-` — c'est ce qui permet de
   taper une charge d'affilée (exposant, `2`, `-`) — et se quitte sur tout
-  autre caractère, l'espace comprise. Recliquer la touche armée la désarme
-  aussi. Une touche armée reste allumée, faute de quoi on ne sait plus dans
-  quel registre on tape après avoir levé le doigt.
+  autre caractère, l'espace et les parenthèses comprises. Recliquer la touche
+  armée la désarme aussi. Une touche armée reste allumée, faute de quoi on ne
+  sait plus dans quel registre on tape après avoir levé le doigt.
+
+  Les chiffres et les signes de la barre passent par la *même* traduction que
+  la frappe clavier, sinon `+` et `-` seraient sourds au mode alors qu'ils
+  servent presque toujours à écrire la charge. Avec la rangée de chiffres, une
+  formule se compose entièrement au doigt, sans clavier du tout — c'est le
+  trajet que couvrent les tests de bout en bout.
 
   Ces touches insèrent de l'Unicode et non de l'ASCII : avec `^` retiré du
   doigt, il faut un signe qui distingue la charge du corps de la formule. Un
@@ -190,8 +198,20 @@ Trois ajustements d'ergonomie, dans le même sens :
   l'application, et celle que produisent les claviers de téléphone : les
   trois voies convergent, donc une formule se tape indifféremment aux trois.
 
+  La rangée de dix chiffres ne peut pas tenir les 44 px de large recommandés
+  par Apple sur un écran étroit. On garde les 48 px de haut et on réduit la
+  police ; le clavier système reste là pour la saisie fine.
+
 - **Valider reste inactif tant que le champ est vide**, comme sur iOS. Sur
   Android, valider vide consommait un point.
+
+- **Plus de touche « clavier ».** Sa fonction était de fermer le clavier
+  virtuel pour accéder à la barre et au bouton Valider, et d'empêcher qu'il
+  se rouvre à chaque question. iOS et Android savent déjà le fermer d'un geste.
+  Le suivi a été repris sans bouton : `validate()` note si le champ avait le
+  focus — donc si le clavier était ouvert — et la question suivante ne le
+  rouvre que dans ce cas. Un clavier volontairement fermé pour lire le retour
+  n'est pas remis sous le nez.
 
 Les formules sont affichées avec de vrais `<sub>`/`<sup>` plutôt qu'avec les
 caractères Unicode de `prettyFormula` : le texte reste sélectionnable et se
@@ -264,3 +284,9 @@ automatiquement. Ces points sont à confirmer à la main sur un téléphone.
 `tools/check-js.py` est un analyseur lexical, pas un parseur. Il distingue
 regex et division par heuristique sur le caractère précédent : il peut se
 tromper sur du JavaScript exotique, ce qui n'apparaît pas ici.
+
+`tools/tests/dom-stub.js` déclare les touches de la barre de symboles à la
+main : c'est un miroir maintenance de `index.html`, donc une source de dérive.
+`tools/verify.py` compare les deux listes — contenu **et** ordre — et échoue si
+elles divergent, pour que les tests ne puissent pas passer sur une barre qui
+n'existe pas à l'écran.

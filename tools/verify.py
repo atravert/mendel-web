@@ -12,6 +12,8 @@ Controles:
   - chaque src/href de index.html existe,
   - chaque icone du manifeste existe, et la taille annoncee correspond,
   - chaque fichier JS importe un module qui existe,
+  - chaque element utilise par ui.js existe dans index.html,
+  - la barre de symboles de index.html correspond a son miroir de test,
   - le manifeste et le JSON de deploiement sont bien formes.
 """
 
@@ -190,6 +192,42 @@ def check_dom_ids(errors):
     return count, missing
 
 
+def check_symbol_bar(errors):
+    """La barre de index.html doit correspondre a son miroir dans dom-stub.js.
+
+    Le stub declare les touches a la main. S'il derive de index.html, les tests
+    passent sur une fiction: ils verifient une barre qui n'existe pas a l'ecran,
+    et la suite reste verte pendant que le joueur, lui, ne trouve pas le chiffre
+    7. On compare les deux listes, dans l'ordre.
+    """
+    html = read("index.html")
+    expected = {
+        "insert": re.findall(r'data-insert="([^"]*)"', html),
+        "script": re.findall(r'data-script="([^"]*)"', html),
+    }
+
+    stub = strip_comments(read("tools/tests/dom-stub.js"))
+    declared = {}
+    for name in ("insert", "script"):
+        block = re.search(r"doc\._%sKeys = \[(.*?)\]" % name, stub, re.S)
+        if not block:
+            errors.append("dom-stub.js: liste _%sKeys introuvable" % name)
+            return 0
+        declared[name] = re.findall(r"'([^']*)'", block.group(1))
+
+    for name in ("insert", "script"):
+        for value in sorted(set(expected[name]) - set(declared[name])):
+            errors.append("dom-stub.js: touche data-%s=\"%s\" de index.html absente du stub"
+                          % (name, value))
+        for value in sorted(set(declared[name]) - set(expected[name])):
+            errors.append("dom-stub.js: touche data-%s=\"%s\" du stub absente de index.html"
+                          % (name, value))
+        if expected[name] != declared[name] and set(expected[name]) == set(declared[name]):
+            errors.append("dom-stub.js: ordre des touches data-%s different de index.html "
+                          "(%s contre %s)" % (name, expected[name], declared[name]))
+    return len(expected["insert"]) + len(expected["script"])
+
+
 def main():
     errors = []
     precache = check_precache(errors)
@@ -198,6 +236,7 @@ def main():
     imports = check_imports(errors)
     audio_refs = check_assets_referenced_by_code(errors)
     dom, missing_dom = check_dom_ids(errors)
+    bar = check_symbol_bar(errors)
 
     print("precache service worker : %d entrees" % precache)
     print("references dans HTML    : %d" % html_refs)
@@ -205,6 +244,7 @@ def main():
     print("imports JS resolus      : %d" % imports)
     print("chemins audio dans le JS: %d" % audio_refs)
     print("ids DOM utilises par ui : %d" % dom)
+    print("touches barre vs stub   : %d" % bar)
 
     if errors:
         print()

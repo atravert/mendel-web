@@ -166,9 +166,9 @@ function createDocument(html, topicIds) {
       return key;
     };
 
-    // L'ordre suit index.html: c'est l'ordre des touches sur l'ecran, et les
-    // tests s'y referent par indice.
-    doc._insertKeys = ['+', '-', '(', ')'].map((value) => makeKey({ insert: value }));
+    // L'ordre suit index.html: rangee des signes, puis rangee des chiffres.
+    doc._insertKeys = ['+', '-', '(', ')', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+      .map((value) => makeKey({ insert: value }));
     doc._scriptKeys = ['sub', 'sup'].map((value) => makeKey({ script: value }));
 
     symbolBar.querySelectorAll = (selector) => {
@@ -186,10 +186,16 @@ function wireDom(doc) {
   return {
     input: doc._elements['answer-input'],
     symbolBar: doc._elements['symbol-bar'],
-    // Touches d'insertion, dans l'ordre de index.html: + - ( )
+    // Touches d'insertion, dans l'ordre de index.html: + - ( ) puis 0 a 9.
     keys: doc._insertKeys || [],
     // Touches d'indice et d'exposant: sub puis sup
     scriptKeys: doc._scriptKeys || [],
+    /**
+     * Retrouve une touche par ce qu'elle insere. Les tests s'y referent par
+     * valeur et non par indice: ajouter une touche ne doit pas les
+     * decaler tous, ni les obliger a recompter l'ordre du HTML.
+     */
+    key: (value) => (doc._insertKeys || []).filter((k) => k.dataset.insert === value)[0],
   };
 }
 

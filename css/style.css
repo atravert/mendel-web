@@ -245,12 +245,18 @@ body {
   opacity: 0.6;
 }
 
-/* Barre de symboles pour composer une formule au doigt. */
+/* Barre de symboles pour composer une formule au doigt. Deux rangees: les
+   signes, puis les chiffres. */
 .symbol-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
   margin-top: 12px;
+}
+
+.symbol-row {
+  display: flex;
+  gap: 8px;
 }
 
 .key {
@@ -273,12 +279,22 @@ body {
   border-color: var(--primary);
 }
 
-.key--wide { flex: 2 1 0; }
+/* Dix chiffres sur une rangee: la largeur de chaque touche tombe sous les
+   44 px recommandes, qu'on ne peut pas tenir ici sans passer sur deux
+   rangees. On garde la hauteur tactile et on reduit la police: la touche
+   reste 48 px de haut, et le clavier systeme reste disponible pour une
+   saisie fine. */
+.symbol-row--digits {
+  gap: 4px;
+}
+
+.key--digit {
+  min-width: 0;
+  font-size: 18px;
+}
 
 /* Touche armee: elle annonce ce que la prochaine frappe produira, il faut
-   donc qu'elle reste visible, pas seulement pendant l'appui du doigt. Le
-   Selecteur est limite a `key--script` parce que la touche du clavier porte
-   aussi un aria-pressed, de sens oppose: "faux" y signifie "clavier ouvert". */
+   donc qu'elle reste visible, pas seulement pendant l'appui du doigt. */
 .key--script[aria-pressed='true'] {
   background: var(--primary);
   color: #fff;

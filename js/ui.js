@@ -35,10 +35,12 @@ const state = {
   index: 0,
   score: 0,
   answered: false,
-  // L'utilisateur peut fermer le clavier (bouton ⌨︎ ou geste iOS). On ne
-  // refocuse l'input que s'il le souhaite encore, sinon il se rouvre tout
-  // seul a chaque question et c'est penible.
-  wantsKeyboard: true,
+  // Le clavier virtuel occupe la moitie de l'ecran et se referme des que le
+  // bouton "Suivant" prend le focus. Le rouvrir a chaque question est le geste
+  // attendu, mais pas si l'utilisateur l'a volontairement referme pour lire le
+  // retour. On note donc s'il etait ouvert au moment de valider, plutot que
+  // d'exposer un bouton de plus a tenir dans un etat.
+  reopenKeyboard: true,
   // 'sub', 'sup', ou null: mode arme par la touche d'indice ou d'exposant.
   // Reinitialise a chaque question, sinon un modearme par erreur
   // contaminerait la question suivante.
@@ -60,7 +62,6 @@ const el = {
   form: document.getElementById('answer-form'),
   input: document.getElementById('answer-input'),
   symbolBar: document.getElementById('symbol-bar'),
-  toggleKeyboard: document.getElementById('toggle-keyboard'),
   validateButton: document.getElementById('validate-button'),
   feedback: document.getElementById('feedback'),
   nextButton: document.getElementById('next-button'),
@@ -145,7 +146,7 @@ function renderQuestion() {
   el.symbolBar.hidden = !expectsFormula(question);
   setScript(null);
 
-  if (state.wantsKeyboard) el.input.focus();
+  if (state.reopenKeyboard) el.input.focus();
 }
 
 function renderFeedback(correct) {
@@ -187,7 +188,7 @@ function startQuiz(topicId) {
   state.index = 0;
   state.score = 0;
   state.answered = false;
-  state.wantsKeyboard = true;
+  state.reopenKeyboard = true;
   resetCommentHistory();
 
   sound.unlock();
@@ -210,6 +211,13 @@ function validate() {
   el.scoreText.textContent = `Score : ${state.score}`;
   el.input.disabled = true;
   el.validateButton.disabled = true;
+
+  // Le bouton Suivant vole le focus, ce qui ferme le clavier virtuel: on note
+  // donc avant, tant que le champ l'a encore. S'il l'a, il etait ouvert et se
+  // rouvrira a la question suivante. S'il ne l'a pas, c'est que l'utilisateur
+  // l'a referme pour lire le retour, et on respecte ce geste au lieu de lui
+  // remettre le clavier sous le nez.
+  state.reopenKeyboard = document.activeElement === el.input;
 
   if (correct) sound.playCorrect();
   else sound.playWrong();
@@ -305,16 +313,21 @@ function onKeydown(event) {
   setScript(step.mode);
 }
 
-function toggleKeyboard() {
-  state.wantsKeyboard = !state.wantsKeyboard;
-  el.toggleKeyboard.setAttribute('aria-pressed', String(!state.wantsKeyboard));
-
-  if (state.wantsKeyboard) {
-    el.input.focus();
-  } else {
-    // Sur iOS, blur() suffit; sur Android, c'est ce qui retire le clavier.
-    el.input.blur();
-  }
+/**
+ * Une touche d'insertion de la barre. Elle passe par la meme traduction que
+ * la frappe clavier, sinon "+" et "-" seraient sourds au mode arme alors
+ * qu'ils servent presque toujours a ecrire la charge: c'est precisement le
+ * cas pour lequel on arme l'exposant. Les chiffres aussi, ce qui permet de
+ * composer une formule entiere au doigt, sans clavier.
+ *
+ * Une parenthese, elle, n'existe qu'en indice ou en exposant: elle est donc
+ * inseree telle quelle et fait sortir du mode, comme une lettre au clavier.
+ */
+function onInsertKey(key) {
+  const value = key.dataset.insert;
+  const step = scriptInput(state.script, value);
+  insertAtCursor(step && step.char !== null ? step.char : value);
+  if (step) setScript(step.mode);
 }
 
 function updateSoundButton() {
@@ -398,14 +411,12 @@ el.symbolBar.addEventListener('pointerdown', (event) => {
 });
 
 for (const key of el.symbolBar.querySelectorAll('[data-insert]')) {
-  key.addEventListener('click', () => insertAtCursor(key.dataset.insert));
+  key.addEventListener('click', () => onInsertKey(key));
 }
 
 for (const key of scriptKeys) {
   key.addEventListener('click', () => toggleScript(key.dataset.script));
 }
-
-el.toggleKeyboard.addEventListener('click', toggleKeyboard);
 
 el.input.addEventListener('input', refreshValidateButton);
 el.input.addEventListener('keydown', onKeydown);

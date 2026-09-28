@@ -35,6 +35,17 @@ function type(text) {
 }
 
 /**
+ * Arme un mode de la barre, ou le laisse tel quel s'il l'est deja. Reappuyer
+ * sur une touche armee la desarme, donc un appel direct ne convient pas pour
+ * "je suis deja en indice": c'est le cas de tout corps contenant deux
+ * chiffres, comme S2O3.
+ */
+function arm(mode) {
+  const key = dom.scriptKeys[mode === 'sub' ? 0 : 1];
+  if (key.getAttribute('aria-pressed') !== 'true') key.fire('click');
+}
+
+/**
  * Retrouve la reponse attendue a partir de l'enonce affiche. Evite d'exposer
  * l'etat interne de ui.js pour les tests.
  */
@@ -245,29 +256,34 @@ startTopic('ions');
 check('sur une formule, la barre est visible',
   document.getElementById('symbol-bar').hidden, false);
 
-// L'ordre des touches est celui de index.html: + - ( )
-check('la premiere touche insere un +', dom.keys[0].dataset.insert, '+');
-check('la deuxieme touche insere un -', dom.keys[1].dataset.insert, '-');
-check('la troisieme touche insere une (', dom.keys[2].dataset.insert, '(');
-check('la quatrieme touche insere une )', dom.keys[3].dataset.insert, ')');
+// Les touches sont reperees par ce qu'elles inserent et non par leur
+// position: ajouter la rangee de chiffres ne doit pas decaler tous les
+// tests, ni les obliger a recompter l'ordre du HTML.
+check('la touche + est presente', dom.key('+').dataset.insert, '+');
+check('la touche - est presente', dom.key('-').dataset.insert, '-');
+check('la touche ( est presente', dom.key('(').dataset.insert, '(');
+check('la touche ) est presente', dom.key(')').dataset.insert, ')');
 ok('plus de touche carets', dom.keys.filter((k) => k.dataset.insert === '^').length === 0);
+check('14 touches d\'insertion: 4 signes et 10 chiffres', dom.keys.length, 14);
+ok('les dix chiffres ont leur touche',
+  '0123456789'.split('').every((d) => dom.key(d) !== undefined));
 
 input.value = 'SO4';
 input.setSelectionRange(4, 4);
-dom.keys[0].fire('click');           // touche "+"
+dom.key('+').fire('click');
 check('le caractere est insere au curseur', input.value, 'SO4+');
 check('le curseur avance', input.selectionStart, 5);
 
-dom.keys[1].fire('click');           // touche "-"
+dom.key('-').fire('click');
 check('second caractere insere', input.value, 'SO4+-');
 
 input.value = 'ClO3';
 input.setSelectionRange(0, 0);
-dom.keys[1].fire('click');
+dom.key('-').fire('click');
 check('insertion en debut de champ', input.value, '-ClO3');
 
 input.setSelectionRange(1, 3);
-dom.keys[2].fire('click');           // touche "("
+dom.key('(').fire('click');
 check('insertion dans une selection', input.value, '-(O3');
 
 // Regression: inserer un symbole ecrit dans .value sans emettre d'evenement
@@ -277,14 +293,14 @@ check('insertion dans une selection', input.value, '-(O3');
   const validateButton = document.getElementById('validate-button');
   input.value = '';
   validateButton.disabled = true;
-  dom.keys[0].fire('click');
+  dom.key('+').fire('click');
   check('inserer un symbole reactive Valider', validateButton.disabled, false);
 }
 
 {
   // pointerdown et non mousedown: c'est l'evenement que les appareils
   // tactiles emettent reellement, et le code s'appuie dessus.
-  const event = dom.symbolBar.fire('pointerdown', { target: dom.keys[0] });
+  const event = dom.symbolBar.fire('pointerdown', { target: dom.key('+') });
   check('la barre empeche la perte de focus', event.defaultPrevented, true);
 
   const horsTouche = dom.symbolBar.fire('pointerdown', {
@@ -294,11 +310,67 @@ check('insertion dans une selection', input.value, '-(O3');
 }
 
 // ---------------------------------------------------------------------------
-// Touches d'indice et d'exposant
+// Touches d'insertion et mode arme
 // ---------------------------------------------------------------------------
 
 {
   const [indice, exposant] = dom.scriptKeys;
+
+  // Sans mode, la rangee de chiffres tape du ASCII: c'est le cas le plus
+  // courant, un indice se tape aussi en 4.
+  input.value = '';
+  input.setSelectionRange(0, 0);
+  dom.key('4').fire('click');
+  check('la touche chiffre tape un 4 ordinaire', input.value, '4');
+
+  // Arme, la MEME touche produit un indice. C'est tout l'objet de la barre:
+  // le joueur choisit une fois le regime, puis tape les chiffres.
+  indice.fire('click');
+  dom.key('2').fire('click');
+  check('la touche chiffre respecte l\'indice arme', input.value, '4₂');
+  check('l\'indice reste arme', indice.getAttribute('aria-pressed'), 'true');
+
+  // "+" et "-" doivent suivre le meme regime. C'est le cas le plus courant de
+  // tout: ecrire une charge, c'est armer l'exposant puis taper "2-". Si ces
+  // deux touches ignoraient le mode, il faudrait repasser par le clavier.
+  input.value = 'SO';
+  input.setSelectionRange(2, 2);
+  exposant.fire('click');
+  dom.key('2').fire('click');
+  dom.key('-').fire('click');
+  check('les signes de la barre suivent l\'exposant', input.value, 'SO²⁻');
+  check('l\'exposant tient apres un signe', exposant.getAttribute('aria-pressed'), 'true');
+
+  indice.fire('click');
+  dom.key('+').fire('click');
+  dom.key('-').fire('click');
+  check('les signes de la barre suivent l\'indice', input.value, 'SO²⁻₊₋');
+
+  // Une parenthese n'existe pas en indice ni en exposant: elle est inseree
+  // telle quelle, et sort du mode comme une lettre au clavier.
+  input.value = 'SO';
+  input.setSelectionRange(2, 2);
+  arm('sub');
+  check('l\'indice est arme avant la parenthese', indice.getAttribute('aria-pressed'), 'true');
+  dom.key('(').fire('click');
+  check('une parenthese reste une parenthese', input.value, 'SO(');
+  check('la parenthese sort du mode', indice.getAttribute('aria-pressed'), 'false');
+  dom.key('-').fire('click');
+  check('apres la parenthese le signe redevient ASCII', input.value, 'SO(-');
+}
+
+// ---------------------------------------------------------------------------
+// Touches d'indice et d'exposant, frappe au clavier
+// ---------------------------------------------------------------------------
+
+{
+  const [indice, exposant] = dom.scriptKeys;
+
+  // Point de depart explicite: si une section precedente laisse un mode arme,
+  // les assertions suivantes partiraient d'un etat sale, et leurs echecs
+  // decaleraient la vraie cause.
+  if (indice.getAttribute('aria-pressed') === 'true') indice.fire('click');
+  if (exposant.getAttribute('aria-pressed') === 'true') exposant.fire('click');
 
   // Le stub n'a pas de saisie clavier: pour une touche que le code laisse
   // passer, on imite le navigateur, sans quoi le champ resterait fige et la
@@ -383,7 +455,11 @@ check('insertion dans une selection', input.value, '-(O3');
 // Bout en bout: composer une formule a la barre, puis la faire valider
 // ---------------------------------------------------------------------------
 
-/** Saisit au clavier une formule au format de data.js, en passant par la barre. */
+/**
+ * Compose une formule au doigt, avec la barre seule: aucun clavier. C'est le
+ * trajet que la rangee de chiffres rend possible, et il doit produire
+ * exactement la forme Unicode attendue par la validation.
+ */
 function composeFormula(formula) {
   const [body, charge] = formula.split('^');
   input.value = '';
@@ -391,16 +467,16 @@ function composeFormula(formula) {
 
   for (const char of body) {
     if (/[0-9]/.test(char)) {
-      dom.scriptKeys[0].fire('click');           // arme l'indice
-      input.fire('keydown', { key: char });
+      arm('sub');                                // arme l'indice
+      dom.key(char).fire('click');               // puis tape le chiffre
     } else {
       input.value += char;
       input.setSelectionRange(input.value.length, input.value.length);
     }
   }
   if (charge) {
-    dom.scriptKeys[1].fire('click');             // arme l'exposant
-    for (const char of charge) input.fire('keydown', { key: char });
+    arm('sup');                                  // arme l'exposant
+    for (const char of charge) dom.key(char).fire('click');
   }
   input.fire('input', { target: input });
 }
@@ -441,34 +517,37 @@ function unicodeFormula(formula) {
     document.getElementById('feedback').className, 'feedback feedback--correct');
   check('le score augmente', document.getElementById('score-text').textContent !== scoreBefore, true);
 
-  // On enchaîne: valider donne le focus au bouton Suivant, et la section
-  // clavier suivante suppose le champ actif.
+  // On enchaîne: valider donne le focus au bouton Suivant, ce qui ferme le
+  // clavier virtuel, et la question suivante doit le rouvrir.
   document.getElementById('next-button').fire('click');
   check('le champ reprend le focus a la question suivante',
     document.activeElement === input, true);
 }
 
 // ---------------------------------------------------------------------------
-// Clavier
+// Clavier virtuel
 // ---------------------------------------------------------------------------
 
 check('le champ a le focus au debut', document.activeElement === input, true);
 {
-  const before = input.focused;
-  document.getElementById('toggle-keyboard').fire('click');
-  check('le clavier se ferme', input.blurred > 0, true);
-  check('l\'etat est memorise',
-    document.getElementById('toggle-keyboard').getAttribute('aria-pressed'), 'true');
-
-  // Une nouvelle question ne doit pas rouvrir un clavier que l'utilisateur
-  // a volontairement ferme.
+  // L'utilisateur a referme le clavier pour lire le retour: le champ a donc
+  // perdu le focus avant la validation. La question suivante ne doit pas le
+  // lui remettre sous le nez.
+  input.blur();
   type(expectedAnswer(currentPrompt()) || 'x');
   submit();
   document.getElementById('next-button').fire('click');
-  check('le clavier ne se rouvre pas tout seul', input.focused, before);
+  check('un clavier volontairement referme ne se rouvre pas',
+    document.activeElement === input, false);
 
-  document.getElementById('toggle-keyboard').fire('click');
-  check('le champ reprend le focus', document.activeElement === input, true);
+  // Le geste inverse: le joueur tape au clavier, le champ a le focus au
+  // moment de valider, et le clavier doit se rouvrir tout seul.
+  input.focus();
+  type(expectedAnswer(currentPrompt()) || 'x');
+  submit();
+  document.getElementById('next-button').fire('click');
+  check('un clavier ouvert se rouvre a la question suivante',
+    document.activeElement === input, true);
 }
 
 // ---------------------------------------------------------------------------
