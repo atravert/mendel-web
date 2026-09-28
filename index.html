@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+
+<title>Mendel — Quiz de chimie</title>
+<meta name="description" content="Quiz de chimie : symboles des éléments chimiques et formules des ions polyatomiques.">
+<meta name="theme-color" content="#1565C0">
+<meta name="color-scheme" content="light">
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+<!-- Ecran d'accueil iOS: sans ces balises, Safari ouvre la page dans un
+     onglet au lieu de la lancer en plein ecran. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mendel">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
+
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<button id="sound-toggle" class="sound-toggle" type="button" aria-pressed="true">
+  <span class="visually-hidden">Couper le son</span>
+  <span aria-hidden="true" id="sound-icon">🔊</span>
+</button>
+
+<main class="shell">
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="screen-start" class="screen">
+    <h1 class="title">Quiz de chimie</h1>
+    <p class="subtitle">Choisis ta série</p>
+
+    <div class="choices">
+      <button class="button button--primary" type="button" data-topic="elements">
+        Éléments chimiques
+      </button>
+      <button class="button button--primary" type="button" data-topic="ions">
+        Ions polyatomiques
+      </button>
+    </div>
+
+    <p class="hint-line">10 questions par série.</p>
+
+    <div class="install" id="install-area" hidden>
+      <button class="button button--ghost" type="button" id="install-button" hidden>
+        Installer l'application
+      </button>
+      <p class="hint-line" id="install-hint" hidden>
+        Sur iPhone : bouton Partager, puis « Sur l'écran d'accueil ».
+      </p>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="screen-quiz" class="screen" hidden>
+    <div class="progress-row">
+      <span class="progress-text" id="progress-text"></span>
+      <span class="progress-text" id="score-text"></span>
+    </div>
+
+    <hr class="rule">
+
+    <p class="question-type" id="question-type"></p>
+    <p class="prompt" id="prompt"></p>
+
+    <form id="answer-form" novalidate>
+      <label class="visually-hidden" for="answer-input">Ta réponse</label>
+      <input
+        id="answer-input"
+        class="answer-input"
+        type="text"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        enterkeyhint="done"
+        maxlength="24"
+        placeholder="">
+
+      <!-- Barre de symboles: uniquement quand la reponse attendue est une
+           formule d'ion, ou ^ et - sont introuvables sur un clavier de
+           telephone. Injectee au curseur, pas concatenee a la fin. -->
+      <div class="symbol-bar" id="symbol-bar" hidden aria-label="Caractères de la formule">
+        <button class="key" type="button" data-insert="^" aria-label="caret">^</button>
+        <button class="key" type="button" data-insert="-" aria-label="moins">-</button>
+        <button class="key" type="button" data-insert="+">+</button>
+        <button class="key" type="button" data-insert="(">(</button>
+        <button class="key" type="button" data-insert=")">)</button>
+        <button class="key key--wide" type="button" id="toggle-keyboard" aria-pressed="false">
+          ⌨︎
+        </button>
+      </div>
+
+      <button class="button button--primary" type="submit" id="validate-button">Valider</button>
+    </form>
+
+    <p class="feedback" id="feedback" hidden aria-live="polite"></p>
+
+    <button class="button button--primary" type="button" id="next-button" hidden></button>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="screen-result" class="screen" hidden>
+    <p class="result-comment" id="result-comment"></p>
+    <p class="result-score" id="result-score"></p>
+
+    <div class="choices">
+      <button class="button button--primary" type="button" id="restart-button">
+        Une nouvelle série
+      </button>
+      <button class="button button--ghost" type="button" id="change-button">
+        Changer de série
+      </button>
+    </div>
+  </section>
+
+</main>
+
+<script type="module" src="js/ui.js"></script>
+</body>
+</html>

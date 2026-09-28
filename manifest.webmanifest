@@ -1,0 +1,39 @@
+{
+  "name": "Mendel — Quiz de chimie",
+  "short_name": "Mendel",
+  "description": "Quiz de chimie : symboles des éléments chimiques et formules des ions polyatomiques.",
+  "lang": "fr",
+  "dir": "ltr",
+
+  "start_url": "./",
+  "scope": "./",
+
+  "display": "standalone",
+  "orientation": "portrait",
+
+  "background_color": "#FFFFFF",
+  "theme_color": "#1565C0",
+
+  "categories": ["education", "games"],
+
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

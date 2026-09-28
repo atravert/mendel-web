@@ -1,0 +1,330 @@
+/* Mendel — feuille de style unique.
+ *
+ * Mobile d'abord: la quasi-totalite des sessions se fait au doigt, sur un
+ * ecran etroit, avec le clavier virtuel souvent ouvert. Les trois difficultes
+ * traitees ici sont toutes des difficultes de telephone:
+ *   - la hauteur de fenetre (100dvh plutot que 100vh),
+ *   - les encoches et barres d'accueil (env(safe-area-inset-*)),
+ *   - le zoom automatique d'iOS sur les champs dont la police est < 16px.
+ */
+
+:root {
+  --primary: #1565C0;
+  --primary-dark: #0D47A1;
+  --correct: #2E7D32;
+  --wrong: #C62828;
+
+  --bg: #FFFFFF;
+  --surface: #F5F6F8;
+  --text: #212121;
+  --text-muted: #616161;
+  --border: #E0E0E0;
+  --input-border: #BDBDBD;
+
+  --radius: 12px;
+  --tap: 48px;               /* cible tactile confortable */
+
+  --gap: 16px;
+  --pad: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121316;
+    --surface: #1C1F24;
+    --text: #ECEDEF;
+    --text-muted: #9BA0A6;
+    --border: #2C3037;
+    --input-border: #4A505A;
+    --primary: #4C8DF6;
+    --primary-dark: #2A6FE0;
+    --correct: #5FBF63;
+    --wrong: #F0655F;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html {
+  /* Empêche le zoom double-tap qui laisse la page décalée. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  /* Pas de rebond de defilement horizontal sur iOS. */
+  overflow-x: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   Structure
+   -------------------------------------------------------------------------- */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  /* 100dvh suit la hauteur reelle quand le clavier virtuel s'ouvre, ce que
+     100vh ne fait pas: c'est ce qui evite d'avoir a faire defiler la page
+     pour atteindre le bouton Valider. */
+  min-height: 100dvh;
+  padding:
+    calc(var(--pad) + env(safe-area-inset-top))
+    calc(var(--pad) + env(safe-area-inset-right))
+    calc(var(--pad) + env(safe-area-inset-bottom))
+    calc(var(--pad) + env(safe-area-inset-left));
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: var(--gap);
+  /* Les trois ecrans se partagent la hauteur, pour que le bouton de bas
+     reste au meme endroit quelle que soit l'etape. */
+  justify-content: center;
+}
+
+/* --------------------------------------------------------------------------
+   Bouton son, toujours en haut a droite, comme sur les deux natives
+   -------------------------------------------------------------------------- */
+
+.sound-toggle {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(8px + env(safe-area-inset-right));
+  z-index: 10;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sound-toggle:active { background: var(--surface); }
+
+/* --------------------------------------------------------------------------
+   Boutons
+   -------------------------------------------------------------------------- */
+
+.button {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 17px;
+  cursor: pointer;
+  touch-action: manipulation;   /* supprime le delai de 300 ms au tap */
+}
+
+.button--primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.button--primary:active { background: var(--primary-dark); }
+
+.button--ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   Ecran de depart
+   -------------------------------------------------------------------------- */
+
+.title {
+  margin: 0;
+  font-size: clamp(28px, 8vw, 36px);
+  text-align: center;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.hint-line {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.install { margin-top: 24px; }
+
+/* --------------------------------------------------------------------------
+   Ecran de quiz
+   -------------------------------------------------------------------------- */
+
+.progress-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gap);
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.rule {
+  height: 1px;
+  margin: 0;
+  border: 0;
+  background: var(--border);
+}
+
+.question-type {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.prompt {
+  margin: 0;
+  /* L'enonce est le point focal de l'ecran: 34sp sur Android, 34pt sur
+     iOS. Ici on interpole pour tenir sur les petits ecrans sans descendre
+     sous une taille lisible. */
+  font-size: clamp(30px, 11vw, 44px);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: break-word;
+}
+
+.prompt sub,
+.prompt sup {
+  font-size: 0.6em;
+  line-height: 0;
+}
+
+.answer-input {
+  display: block;
+  width: 100%;
+  min-height: var(--tap);
+  /* 20px: en dessous de 16px, iOS zoome la page au focus. */
+  font: inherit;
+  font-size: 20px;
+  padding: 10px 14px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius);
+}
+
+.answer-input:focus {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.answer-input:disabled {
+  opacity: 0.6;
+}
+
+/* Barre de symboles pour composer une formule au doigt. */
+.symbol-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.key {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: var(--tap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 20px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.key:active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.key--wide { flex: 2 1 0; }
+
+#answer-form { display: flex; flex-direction: column; }
+
+/* --------------------------------------------------------------------------
+   Retour et resultat
+   -------------------------------------------------------------------------- */
+
+.feedback {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  text-align: center;
+  white-space: pre-line;   /* le message d'echec contient un retour a la ligne */
+}
+
+.feedback--correct { color: var(--correct); }
+.feedback--wrong { color: var(--wrong); }
+
+.result-comment {
+  margin: 0;
+  color: var(--primary);
+  font-size: clamp(22px, 6vw, 30px);
+  font-weight: 700;
+  text-align: center;
+}
+
+.result-score {
+  margin: 0;
+  font-size: 22px;
+  text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   Utilitaires
+   -------------------------------------------------------------------------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+[hidden] { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

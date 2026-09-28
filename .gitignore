@@ -1,0 +1,4 @@
+.DS_Store
+.build-test.js
+# Artefact de generation: tools/make-icons.py le recreate a chaque `make icons`.
+icons/icon-1024.png
