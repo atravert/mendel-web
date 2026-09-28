@@ -25,7 +25,7 @@
      verifie par make verify. Sans lui, impossible de distinguer un appareil
      qui tourne encore l'ancien code d'un appareil ou le correctif echoue:
      les deux affichent exactement la meme chose. -->
-<meta name="app-version" content="d83e6ffc">
+<meta name="app-version" content="8b780e3d">
 
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -81,6 +81,15 @@
 
     <p class="question-type" id="question-type"></p>
     <p class="prompt" id="prompt"></p>
+
+    <!-- Le commentaire REPREND la place de l'enonce, et ne s'y ajoute pas.
+         Plus bas, il poussait la zone d'action hors de l'ecran -- c'est ce qui
+         le rendait invisible sur iOS, avec le bouton Suivant. A cette place
+         il ne coute rien: l'enonce a disparu, donc la place est libre. Il ne
+         le remplacerait pas exactement non plus, car il est plus long -- deux
+         lignes de retour contre une ligne d'enonce, et trois pour une mauvaise
+         reponse. Voir P2 dans le README. -->
+    <p class="feedback" id="feedback" hidden aria-live="polite"></p>
 
     <form id="answer-form" novalidate>
       <label class="visually-hidden" for="answer-input">Ta réponse</label>
@@ -141,18 +150,61 @@
         </div>
       </div>
 
-      <!-- `type="button"`, et non "submit": chaque source d'entree a son
-           chemin. Le clic vient sur `click`, la touche retour sur `keydown`
-           dans ui.js. Un formulaire a bouton de soumission, lui, ferait
-           dependre la touche retour d'une soumission implicite dont iOS ne
-           garantit pas le second passage. Voir onKeydown(). -->
-      <button class="button button--primary" type="button" id="validate-button">Valider</button>
     </form>
-
-    <p class="feedback" id="feedback" hidden aria-live="polite"></p>
-
-    <button class="button button--primary" type="button" id="next-button" hidden></button>
   </section>
+
+  <!-- La mesure du debordement, lue sur l'appareil.
+
+       Les 508 px annonces dans le CSS n'ont jamais ete mesures: c'etait un
+       calcul, et un iPhone 15 Pro les a refuses. C'est exactement ce qui
+       rendait le bandeau de retour et le bouton Suivant invisibles, et
+       exactement ce qu'aucune assertion JS ne pouvait voir: elle verrait que
+       le commentaire existe, ce qui est vrai, jamais qu'il est sous le
+       clavier.
+
+       Ce bandeau n'apparait QUE si l'ecran deborde malgre la barre
+       d'action. Silencieux dans le cas normal, donc jamais encombreux, et
+       impossible a ignorer quand il y a un vrai probleme. Permanent, ce
+       serait du bruit qu'on arrete de lire.
+
+       Hors de l'ecran defilant, lui aussi: un diagnostic que le debordement
+       rend lui-meme inatteignable n'en serait pas un.
+
+       Les deux chiffres bruts y sont, parce que "ca ne rentre pas" ne se
+       corrige pas, et "601 px pour 508 px" se corrige. P5 dans le README. -->
+  <p class="overflow-note" id="overflow-note" hidden></p>
+
+  <!-- La zone d'action, HORS de l'ecran qui defile, et sibling des trois
+       ecrans. C'est le point delicat, et la premiere version s'est trompee.
+
+       `position: sticky` a l'interieur de l'ecran defilant NE GARANTIT RIEN.
+       Un element colle ne peut se deplacer que dans la boite de son parent:
+       ici, le formulaire. Si le formulaire est lui-meme plus bas que la zone
+       visible -- ce qui arrive des que le contenu deborde, donc precisement
+       dans le cas qu'on voulait securiser -- la barre ne peut pas remonter
+       au-dessus de lui. Elle reste donc hors champ, au meme endroit qu'avant.
+       Le symptome etait intact, avec une regle CSS de plus en travers.
+
+       Enfant direct de la coque, qui est calee sur la hauteur visible et ne
+       defile pas, la barre est un simple element de flex au bas de l'ecran:
+       elle y reste quoi qu'il arrive du contenu. Elle ne depend plus d'une
+       mesure, ni de la position d'aucun autre element. C'est la seule forme
+       du probleme qui ne se repose pas sur un nombre mesure a la main.
+
+       Elle n'apparait que sur le quiz, via `data-screen` -- le meme attribut
+       que pour l'icone du son.
+
+       `type="button"` sur les deux, et c'est volontaire: chaque source
+       d'entree a son chemin. Le clic vient sur `click`, la touche retour sur
+       `keydown` dans ui.js, et le gestionnaire `submit` du formulaire est
+       inerte. Une soumission implicite dont iOS ne garantit pas le second
+       passage n'intervient donc nulle part. Voir onKeydown(). -->
+
+  <!-- P3 dans le README. -->
+  <div class="actions" id="actions">
+    <button class="button button--primary" type="button" id="validate-button">Valider</button>
+    <button class="button button--primary" type="button" id="next-button" hidden></button>
+  </div>
 
   <!-- ---------------------------------------------------------------- -->
   <section id="screen-result" class="screen" hidden>

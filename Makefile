@@ -40,11 +40,17 @@ check: syntax test verify cache-check
 # verification qui ne compile pas ne peut pas signaler qu'il ne compile pas,
 # et l'oubli ne se voit qu'au moment ou l'on a besoin de lui. C'est arrive
 # avec `defComparer()` dans check-published.py, que rien n'avait attrape.
+#
+# La recherche de caracteres parasites est ici pour la meme raison: ils se sont
+# glisses trois fois dans des commentaires, toujours invisibles a la relecture,
+# et aucun test ne les voit -- un ideogramme au milieu d'une phrase francaise
+# n'interrompt rien. Il se signale tout seul, encore faut-il le demander.
 syntax:
 	@echo "== syntaxe =="
 	@$(PYTHON) tools/check-js.py $(PROD_JS) $(TEST_JS)
 	@$(PYTHON) -m py_compile $(wildcard tools/*.py)
 	@echo "ok     outils python"
+	@$(PYTHON) tools/parasites.py .
 
 test:
 	@echo ""

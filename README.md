@@ -266,9 +266,7 @@ geste de la série au dernier.
 Il restait 34 px à unforesevoir : la marge de l'indicateur d'accueil. Elle n'est
 utile que **sans** clavier — le clavier la recouvre, elle devient du vide.
 `syncViewport()` la déduit de la hauteur visible et pose `data-keyboard="open"`,
-ce qui remet la marge à zéro. Le contenu de l'écran de quiz passe alors de
-503 à 469 px, pour 508 px visibles sur un iPhone 15 : l'énoncé, le champ et
-Valider tiennent ensemble à l'écran, avec 39 px d'air.
+ce qui remet la marge à zéro.
 
 Le seuil de 80 px départage le clavier de la barre d'adresse d'iOS, qui
 rétracte la fenêtre de 90 px sans qu'aucun clavier n'existe à l'écran.
@@ -277,6 +275,148 @@ Le prix de l'ancrage : sans clavier, le contenu occupe le haut de l'écran et le
 bas reste vide. C'est acceptable parce que le clavier ouvert est l'état normal
 d'une série — c'est tout l'objet de la demande — et que l'état sans clavier
 n'est visible que sur les deux autres écrans, qui restent centrés.
+
+### Le budget vertical, et pourquoi il ne tenait pas
+
+Ce paragraphe remplace une affirmation qui était fausse, et il faut la lire
+avec cette histoire en tête.
+
+Le CSS annonçait **469 px de contenu pour 508 px disponibles sur un iPhone 15**,
+donc « l'énoncé, le champ et Valider tiennent ensemble à l'écran, avec 39 px
+d'air ». Les deux nombres avaient le même défaut : ils étaient **calculés**.
+Aucun n'avait été mesuré sur un appareil.
+
+Et le 469 px ne décrivait que l'état **avant** réponse. Or les deux éléments
+dont la disparition a été signalée — le bandeau de commentaire et le bouton
+« Question suivante » — n'existent **qu'après** réponse, et ils étaient les
+deux derniers enfants du flux, donc les deux premiers à sortir :
+
+| État | Contenu requis |
+|---|---|
+| Avant réponse (ion, barre de symboles visible) | **468 px** |
+| Après réponse, commentaire sur 1 ligne | **555 px** |
+| Après réponse, commentaire sur 3 lignes (mauvaise réponse) | **601 px** |
+
+Le cas le plus défavorable est la **mauvaise réponse** : `renderFeedback()`
+ajoute « La bonne réponse était : … » dans un bandeau en `white-space:
+pre-line`. Le commentaire le plus long de `data.js` fait 85 caractères, sans
+saut de ligne ; ajouté à cette phrase, il tient sur trois lignes.
+
+Le budget annoncé ne pouvait donc pas tenir : **déficit de 47 à 93 px, avant de
+compter un seul pixel de barre Safari.** Un iPhone 15 Pro l'a refusé, et le
+commentaire comme le bouton Suivant ont disparu de l'écran.
+
+C'est la même faute que celle déjà commise sur la touche retour : **affirmer un
+nombre dérivé d'un modèle de la plateforme au lieu de l'observer.** Ce qui compte
+désormais, c'est qu'il se corrige en mesurant — voir ci-dessous.
+
+### Quand il n'y a pas assez de place
+
+Quatre correctifs, dans cet ordre. Le premier est un gain, les deux suivants
+sont structurels, et le dernier est une simple mesure.
+
+**P1 — Le bouton Valider disparaît au lieu de se griser.** Il passait
+`disabled` et **restait en place** : 48 px du budget vertical pour une action
+morte, à l'endroit exact où la place manquait. Deux boutons à l'écran pour une
+seule action utile, c'est aussi déroutant. Les deux occupaient la même barre,
+donc en masquer un revient à zéro.
+
+`disabled` reste posé : c'est le verrou réel, et il doit tenir même si quelque
+chose réapparaît le bouton par erreur. Masquer ne remplace pas verrouiller,
+c'est l'inverse.
+
+**P2 — Le commentaire reprend la place de l'énoncé.** L'énoncé est devenu
+redondant une fois qu'on y a répondu, et c'est le commentaire qui a de la
+valeur. L'énoncé et le type de question s'effacent (`html[data-answered='1']`,
+posé par `validate()` et retiré par `renderQuestion()`), et le commentaire les
+remplace **à leur place** : il est placé juste avant le formulaire dans
+`index.html`, donc quand l'énoncé sort du flux, le commentaire est déjà dans le
+sien. Pas au-dessus, pas en dessous — **à la place**.
+
+Ce n'est pas qu'une optimisation. Placé plus bas, le commentaire s'empilait
+sous le formulaire : il poussait la zone d'action hors de l'écran, et
+l'utilisateur ne pouvait pas le lire sans défiler. Il masquait deux choses au
+lieu d'une. Son rendu est un peu plus long que l'énoncé — deux lignes de retour
+contre une, trois pour une mauvaise réponse — donc la reprise n'est pas
+exacte, et le bouton Suivant peut rester bas. L'ordre dans le document est
+vérifié par `tools/verify.py`.
+
+**P3 — La zone d'action est un enfant de la coque, pas de l'écran qui défile.**
+C'est le correctif de fond, et il a fallu deux essais.
+
+*Le premier essai* était `position: sticky` à l'intérieur de l'écran défilant.
+Il ne garantit **rien** : un élément collé ne peut se déplacer que dans la boîte
+de son parent — ici, le formulaire. Dès que le contenu déborde, donc
+précisément dans le cas qu'on voulait sécuriser, le formulaire est plus bas que
+la zone visible et la barre ne peut pas remonter au-dessus de lui. Elle restait
+hors champ : le symptôme intact, avec une règle CSS de plus en travers.
+
+*Le bon* : `.actions` est un enfant direct de `.shell`, qui est calé sur la
+hauteur visible et ne défile pas. La barre est alors un simple élément de flex
+au bas de l'écran, et elle y reste **quoi qu'il arrive du contenu**. Elle ne
+dépend plus d'une mesure, ni de la position d'un autre élément — c'est la seule
+forme du problème qui ne se repose pas sur un nombre écrit à la main.
+
+Deux corollaires, tous deux vérifiés :
+
+- `.shell` est passé de `min-height` à **`height`**, plus `overflow: hidden`. En
+  `min-height`, la coque pouvait grandir au-delà de la hauteur visible : c'était
+  alors le *document* qui défilait, et il n'y avait plus de bas où caler la barre.
+  `.screen` est le seul conteneur qui défile, et c'est ce qui donne son point de
+  référence à la barre.
+- La barre n'apparaît que sur le quiz, via `html[data-screen='quiz']` — le même
+  attribut que pour l'icône du son.
+
+`tools/verify.py` **refuse** `sticky` et `fixed` sur `.actions`, avec le motif de
+chaque refus. Ce ne sont pas deux styles : ce sont deux solutions qui ont été
+tentées, et deux erreurs que vaut la peine de garder en mémoire.
+
+**Cette correction a un effet de bord, et il a fallu le voir.** Les boutons
+n'étant plus des descendants de `#screen-quiz`, la parade anti-prise de focus du
+conteneur ne les voyait plus : Valider et Suivant reprenaient le focus, le
+champ le perdait, le clavier se fermait, et l'écran sautait — le tremblement exact
+que la parade venait d'éliminer, revenu par la porte de la correction. Même
+situation que le bouton son, qui est en `position: fixed` et enfant de `body`.
+`#actions` porte donc sa propre parade, et `tools/verify.py` refuse
+`position: sticky` **et** exige que `.actions` soit hors de `#screen-quiz`.
+
+Le harnais de test était lui aussi faux : il rattachait les boutons à
+`#screen-quiz`. Les assertions « Valider bloque la prise de focus » restaient
+vertes parce que la parade du quiz les satisfait — sur une page où elle ne les
+voit plus. Un écouteur fantôme dans le harnais, un vrai tremblement sur
+l'appareil. Les deux liens de parenté sont donc d'abord assertionnés, puis
+l'affirmation seulement (*voir* « Ce qui est vérifié, et comment »).
+
+**P5 — L'appareil mesure son propre débordement.** `mesurerDebordement()`
+compare `scrollHeight` et `clientHeight` de l'écran de quiz, et affiche un
+bandeau **seulement s'il déborde** : `Il manque 93 px : 601 px de contenu pour
+508 px visibles. Défilez pour lire le retour.`
+
+Il est appelé à chaque changement de hauteur visible, pas seulement au rendu :
+c'est ainsi qu'un débordement apparaît ou disparaît aussi à une rotation ou à une
+ouverture de clavier en cours de partie.
+
+Le bandeau n'apparaît que dans le cas problématique. Permanent, ce serait du
+bruit qu'on arrête de lire — et un diagnostic qu'on ne lit plus est un
+diagnostic qu'on n'a pas.
+
+**Les deux chiffres bruts y sont**, parce que « ça ne rentre pas » ne se corrige
+pas, et « 601 px pour 508 px » se corrige. C'est ce que l'utilisateur peut
+ rapporter, et c'est le nombre qu'il fallait.
+
+Et la tolérance est d'un pixel : ces deux hauteurs sont arrondies par le
+navigateur, et un demi-pixel de débordement n'a rien de réel. Sans elle, le
+bandeau s'afficherait sur un écran qui tient exactement, et l'utilisateur
+finirait par l'ignorer.
+
+Ni `verify.py` ni les 312 assertions ne peuvent voir la mise en page : le
+faux DOM n'a pas de moteur de rendu, et une assertion qui dirait « le
+commentaire est sous le clavier » serait une assertion sur rien. Ce que les
+tests vérifient, c'est que l'application **réagit correctement à une mesure** ;
+les deux nombres sont posés à la main dans le test, et personne ne les calcule.
+Un test qui prétendrait mesurer la hauteur simulerait exactement le défaut
+qu'il est censé attraper. **Le vrai chiffre reste à produire sur l'appareil** —
+c'est ce que le bandeau est là pour.
 
 ### La touche retour du clavier
 
@@ -453,6 +593,14 @@ harnais voit bien ce que voit un navigateur.
 | l'énoncé ne bouge pas quand la hauteur change | `.screen-quiz` sans marge auto |
 | la barre d'adresse n'est pas un clavier | `data-keyboard` absent à 790 px |
 | l'indicateur d'accueil s'écarte avec le clavier | `data-keyboard="open"` à 508 px |
+| Valider disparaît, pas seulement gris | `hidden` à `true`, `disabled` aussi |
+| Valider revient à la question suivante | `hidden` à `false` |
+| l'état répondu est publié puis retiré | `data-answered`, puis absent |
+| un débordement réel est signalé | bandeau visible, les deux chiffres |
+| un écran qui tient exactement reste muet | tolérance d'un pixel |
+| rien n'est signalé hors du quiz | bandeau masqué |
+| le harnais voit les boutons dans la zone d'action | `_parent === actions` |
+| le harnais ne les voit plus dans l'écran de quiz | `_parent !== screen-quiz` |
 
 Trente-quatre régressions ont été introduites puis vérifiées comme détectées : le
 focus volé par Suivant, le champ `disabled` après validation, le focus reporté
@@ -474,6 +622,34 @@ sécurité supprimé, l'exclusion par le focus retirée, l'exclusion des boutons
 retirée, la garde hors série retirée, le champ ne remontant plus au document,
 l'écran de quiz ne remontant plus au document, et `doc.fire` sans
 `preventDefault`.
+
+Vingt-deux de plus pour les correctifs de place, dont trois qui sont
+invisibles sans téléphone : Valider qui ne disparaît plus, `data-answered` qui
+n'est plus posé, Valider qui ne revient pas à la question suivante, la barre
+d'action en `sticky`, la barre d'action en `fixed`, la coque revenue en
+`min-height`, le document redevenu défilable, la barre d'action sans
+`flex: 0 0 auto`, la règle de portage `data-screen` retirée, la règle CSS
+`data-answered` retirée, la zone d'action replacée dans `#screen-quiz`, le
+bandeau de mesure replacé dans `#screen-quiz`, le bandeau de mesure né
+visible, le commentaire remis sous le formulaire, la parade de `#actions`
+supprimée, la mesure jamais prise, la mesure remplacée par une constante, la
+tolérance d'un pixel disparue, et quatre mutations du harnais lui-même —
+les boutons rattachés au mauvais parent, un bouton qui ne se reconnaît plus,
+la zone d'action qui ne remonte plus au `document`, et le lien de propagation.
+
+Les trois mutations du harnais sont les plus instructives. Rattacher les
+boutons à `#screen-quiz` — comme le harnais le faisait encore — laissait
+**toutes** les assertions au vert : la parade du conteneur les satisfait, sur
+une page où elle ne les voit plus. Rien ne pouvait le dire, parce qu'un
+écouteur fantôme dans un harnais est indiscernable d'un vrai écouteur.
+C'est pour cela que les deux parentés sont désormais **assertionnées avant**
+d'affirmer quoi que ce soit sur la parade.
+
+Et le harnais de mutation lui-même a été corrigé dans la foulée : il comptait
+seulement les assertions en échec, donc un mutant qui cassait le harnais — un
+échec bruyant — passait pour « non détecté ». Il distingue maintenant les
+trois issues : détecté par une assertion, détecté par un échec de harnais
+(trop brutal), et non détecté.
 
 Trois de ces contrôles ont eux-mêmes eu besoin d'être repris, parce qu'ils
 passaient au vert sur du CSS absent :
@@ -497,11 +673,17 @@ hauteur. Il ne peut pas garantir deux choses que seul un téléphone tranche :
   remède est de faire la première question au `touchend` plutôt qu'au `click`,
   qui est le geste que le navigateur reconnaît sans ambiguïté.
 - que l'énoncé, le champ et Valider tiennent ensemble à l'écran une fois le
-  clavier levé. Le calcul dit 469 px de contenu pour 508 px visibles sur un
-  iPhone 15, donc 39 px d'air — mais il n'a pas été mesuré sur un appareil.
-  Sur un iPhone SE il n'y a que 407 px : le contenu déborde de 62 px et
-  `.screen` défile. C'est le seul écran où l'invariant « rien ne bouge » se
-  heurte à la taille de l'écran, pas au clavier.
+  clavier levé. **C'était le calcul du CSS, et il était faux** : les 469 px ne
+  décrivaient que l'état avant réponse, et l'état après réponse demande jusqu'à
+  601 px pour les 508 px annoncés. Un iPhone 15 Pro l'a refusé, et le
+  commentaire comme le bouton Suivant ont disparu. Le calcul a été remplacé
+  par `mesurerDebordement()`, qui lit les hauteurs **sur l'appareil** et
+  n'affiche un bandeau que s'il déborde. Le nombre à crediter est donc celui
+  que le téléphone affichera, pas celui de cette page.
+  L'action, elle, n'est plus soumise à la question : `.actions` est un enfant
+  de la coque, donc au bas de la zone visible quoi qu'il arrive du contenu.
+  Seule la **lecture du commentaire** peut demander un défilement, et c'est
+  sans gravité — c'est ce que dit le bandeau quand il apparaît.
 - que le système retire ou non le focus du champ quand il valide une
   correction. Le filet de sécurité de la touche retour rend la question sans
   importance, mais il ne peut pas être vérifié ici : aucun faux DOM ne simule
@@ -717,6 +899,24 @@ permettait de les distinguer sans ce numéro.
 Le seul piège qui subsiste est de modifier un fichier précaché et de pousser
 sans avoir lancé `make`. Le garde-fou est là pour le transformer en échec rouge
 plutôt qu'en silence.
+
+### Lancer l'application installée, et non un onglet
+
+**C'est le premier réflexe, et il ne coûte aucune ligne de code.**
+
+En onglet Safari, la barre d'adresse occupe 49 à 83 pt en bas de l'écran selon
+qu'elle est repliée ou déployée. Installée depuis l'écran d'accueil, l'application
+n'a **aucune barre** : c'est la différence la plus grande qui soit, et elle est
+gratuite.
+
+L'application installée est aussi la seule façon de tester ce que l'utilisateur
+utilise. Un bug visible « seulement dans Safari » est très souvent le comportement
+de l'onglet, pas celui de l'application.
+
+Le test de terrain qui a produit ce diagnostic est là-dessus : la barre d'URL
+signalée comme masquant le bas de l'écran ne peut pas exister dans l'application
+installée. Sa présence indiquait qu'on testait un onglet, et elle a mangé une
+partie du budget vertical que le CSS ne comptait pas.
 
 ---
 

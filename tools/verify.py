@@ -640,6 +640,251 @@ def check_service_worker(errors):
     return count
 
 
+def check_action_bar(errors):
+    """La zone d'action est atteignable, et le contenu qui disparait libere sa place.
+
+    Le symptome signale sur iOS etait precis: le bandeau de retour et le bouton
+    Suivant invisibles derriere le clavier. Ce n'etait ni le clavier ni une
+    hauteur d'ecran, c'etait une structure:
+
+      - la coque portait `min-height`, donc elle pouvait GRANDIR au-dela de la
+        hauteur visible, et c'etait le DOCUMENT qui defilait. Un `position:
+        sticky` se colle alors au bas du viewport de mise en page, pas de la
+        zone visible -- et sur iOS ce viewport ne retrecit pas quand le clavier
+        se leve. La barre se retrouvait donc sous le clavier: la forme
+        exactement inverse de ce qu'on lui demandait. D'ou `height`, plus
+        `overflow: hidden`, et le fait que `.screen` reste le seul conteneur qui
+        defile;
+
+      - l'enonce et le type de question restaient en place apres la reponse,
+        70 px et 34 px occupes pendant que le bouton Suivant attendait en bas;
+      - le bouton Valider se grisait sans disparaitre, 48 px pour une action
+        morte.
+
+    Chacune de ces trois choses se verifie ici, parce qu'aucune n'est visible
+    depuis un test JS: elles sont du CSS et du markup. Et chacune se
+    reverrouille sur une valeur exacte plutot que sur une intention.
+    """
+    count = 0
+    css = strip_comments(read("css/style.css"))
+    regles = parse_rules(css)
+
+    # --- La coque calee sur la hauteur visible, et elle seule ---------------
+    shell = regles.get(".shell")
+    if shell is None:
+        errors.append("style.css: regle .shell introuvable")
+        return count
+
+    if re.search(r"(^|[;\s])min-height\s*:", shell):
+        errors.append("style.css: .shell en min-height: la coque peut depasser la "
+                      "hauteur visible, le document defile, et la barre collee se "
+                      "colle au viewport de mise en page -- sous le clavier sur "
+                      "iOS. Utiliser height.")
+    else:
+        count += 1
+
+    if not re.search(r"(^|[;\s])height\s*:", shell):
+        errors.append("style.css: .shell sans height: rien ne cale la coque sur la "
+                      "hauteur visible publiee par --app-height.")
+    else:
+        count += 1
+
+    if not re.search(r"overflow\s*:\s*hidden", shell):
+        errors.append("style.css: .shell sans overflow: hidden: le document "
+                      "defile aussi, et la barre collee perd son point de "
+                      "reference.")
+    else:
+        count += 1
+
+    # `.screen` doit rester le seul a defiler: c'est lui qui borne la barre.
+    screen = regles.get(".screen")
+    if screen is None or not re.search(r"overflow-y\s*:\s*auto", screen):
+        errors.append("style.css: .screen sans overflow-y: auto: plus aucun "
+                      "conteneur ne defile, donc la barre collee n'a plus de "
+                      "bas auquel se coller.")
+    else:
+        count += 1
+
+    # --- La barre d'action, enfant de la coque et rien d'autre -----------
+    actions = regles.get(".actions")
+    if actions is None:
+        errors.append("style.css: regle .actions introuvable: les deux actions ne "
+                      "sont plus regroupees, donc rien ne garantit qu'elles restent "
+                      "atteignables quand le contenu deborde.")
+        return count
+
+    # `sticky` et `fixed` sont refuses, et pas seulement absents. Les deux
+    # ont ete essayes, et les deux sont faux:
+    #   - `fixed` se cale sur le viewport de mise en page, qui ne retrecit pas
+    #     sur iOS quand le clavier se leve: la barre part sous le clavier;
+    #   - `sticky` ne se deplace que dans la boite de son parent. Parent du
+    #     bouton dans l'ecran defilant, c'est le formulaire -- et des que le
+    #     contenu deborde, le formulaire est plus bas que la zone visible,
+    #     donc la barre ne peut pas remonter au-dessus de lui. Le symptome
+    #     reste entier.
+    # Enfant de la coque, qui ne defile pas, la barre est un element de flex
+    # au bas de la zone visible: ca, ca tient quelle que soit la hauteur.
+    position = re.search(r"position\s*:\s*(\w+)", actions)
+    if position:
+        trouve = position.group(1)
+        if trouve == "sticky":
+            errors.append("style.css: .actions en position sticky: un element "
+                          "colle ne se deplace que dans la boite de son parent, "
+                          "donc pas au-dessus du formulaire. Le symptome reste "
+                          "entier. Faire de .actions un enfant de .shell.")
+        elif trouve == "fixed":
+            errors.append("style.css: .actions en position fixed: il se cale sur "
+                          "le viewport de mise en page, qui ne retrecit pas sur "
+                          "iOS quand le clavier se leve. Faire de .actions un "
+                          "enfant de .shell.")
+        else:
+            errors.append("style.css: .actions en position %s: position sans "
+                          "effet ici, la barre n'est plus garantie en bas de la "
+                          "zone visible." % trouve)
+    else:
+        count += 1
+
+    if not re.search(r"flex\s*:\s*0\s+0\s+auto", actions):
+        errors.append("style.css: .actions sans flex: 0 0 auto: un contenu long "
+                      "peut compresser la zone d'action.")
+    else:
+        count += 1
+
+    if not re.search(r"display\s*:\s*none", actions):
+        errors.append("style.css: .actions visible par defaut: la barre "
+                      "d'action s'afficherait aussi sur l'ecran d'accueil et "
+                      "sur le resultat. Le portage est conditionne par "
+                      "data-screen.")
+    else:
+        count += 1
+
+    # Le portage: visible seulement sur le quiz, via l'attribut deja publie.
+    portage = regles.get("html[data-screen='quiz'] .actions")
+    if portage is None:
+        portage = regles.get('html[data-screen="quiz"] .actions')
+    if not portage or not re.search(r"display\s*:\s*flex", portage):
+        errors.append("style.css: pas de regle affichant .actions quand "
+                      "data-screen vaut 'quiz': la barre d'action resterait "
+                      "masquee sur l'ecran ou elle sert, ou visible partout.")
+    else:
+        count += 1
+
+    # Le bandeau de mesure doit etre visible lui aussi: s'il reste dans
+    # l'ecran qui defile, le debordement le rend inatteignable, et il perd
+    # donc sa raison d'etre.
+    note = regles.get(".overflow-note")
+    if note is None:
+        errors.append("style.css: regle .overflow-note introuvable")
+    else:
+        if not re.search(r"flex\s*:\s*0\s+0\s+auto", note):
+            errors.append("style.css: .overflow-note sans flex: 0 0 auto: le "
+                          "diagnostic peut etre ecrase par le contenu.")
+        else:
+            count += 1
+
+    # --- L'enonce s'efface, et le commentaire prend sa place ---------------
+    masque = regles.get("html[data-answered='1'] .question-type")
+    if masque is None:
+        masque = regles.get('html[data-answered="1"] .question-type')
+    if not masque or "display" not in masque or "none" not in masque:
+        errors.append("style.css: pas de regle masquant .question-type quand "
+                      "data-answered est pose: l'enonce et le type de question "
+                      "restent en place apres la reponse, et la place manque "
+                      "justement la.")
+    else:
+        count += 1
+
+    masque_prompt = regles.get("html[data-answered='1'] .prompt")
+    if masque_prompt is None:
+        masque_prompt = regles.get('html[data-answered="1"] .prompt')
+    if not masque_prompt or "none" not in masque_prompt:
+        errors.append("style.css: pas de regle masquant .prompt quand "
+                      "data-answered est pose: les 53 px de l'enonce ne sont pas "
+                      "rendus au commentaire.")
+    else:
+        count += 1
+
+    # --- Le markup: l'ordre decide de l'occupation de la place -------------
+    html = read("index.html")
+
+    try:
+        pos_feedback = html.index('id="feedback"')
+        pos_form = html.index('id="answer-form"')
+    except ValueError:
+        errors.append("index.html: #feedback ou #answer-form introuvable")
+        return count
+
+    # Le commentaire doit preceder le formulaire: apres la reponse, l'enonce
+    # disparait, et c'est donc le commentaire qui occupe l'emplacement libere.
+    # Place apres le formulaire, il s'y EMPILE au lieu de le reprendre.
+    if pos_feedback > pos_form:
+        errors.append("index.html: #feedback apres #answer-form: le commentaire "
+                      "s'empile sous le formulaire au lieu de reprendre la place "
+                      "laissee par l'enonce, qui ne peut donc pas etre rendue.")
+    else:
+        count += 1
+
+    # Valider et Suivant dans la meme barre, elle-meme enfant de la coque.
+    try:
+        pos_actions = html.index('class="actions"')
+        pos_valider = html.index('id="validate-button"')
+        pos_suivant = html.index('id="next-button"')
+        fin_form = html.index("</form>", pos_form)
+        fin_quiz = html.index("</section>", pos_form)
+        fin_main = html.index("</main>")
+    except ValueError:
+        errors.append("index.html: .actions, un des deux boutons, </form>, "
+                      "</section> ou </main> introuvable")
+        return count
+
+    # La barre doit etre APRES la fermeture de l'ecran: enfant de la coque,
+    # elle seule n'a pas de conteneur qui defile autour d'elle.
+    if not (fin_quiz < pos_actions < fin_main):
+        errors.append("index.html: .actions n'est pas enfant de .shell: etant dans "
+                      "#screen-quiz, elle se retrouve dans le conteneur qui defile, "
+                      "donc elle disparait avec lui. C'est la cause du symptome.")
+    else:
+        count += 1
+
+    # Les deux boutons dans la barre. Hors de la barre, l'un des deux -- Suivant
+    # en particulier -- redeviendrait le dernier element du flux, donc le
+    # premier a sortir de l'ecran.
+    if not (pos_actions < pos_valider < fin_main) or not (pos_actions < pos_suivant):
+        errors.append("index.html: un des deux boutons n'est pas dans .actions")
+    else:
+        count += 1
+
+    # Le bandeau de mesure hors de l'ecran defilant, lui aussi.
+    try:
+        pos_note = html.index('id="overflow-note"')
+    except ValueError:
+        errors.append("index.html: #overflow-note introuvable")
+        pos_note = -1
+    if pos_note != -1:
+        if not (fin_form < pos_note < fin_main):
+            errors.append("index.html: #overflow-note dans #screen-quiz: le "
+                          "debordement le rend lui-meme inatteignable, et il perd "
+                          "donc sa raison d'etre.")
+        else:
+            count += 1
+
+    # Le bandeau doit naitre masque: un diagnostic visible d'emblee annonce un
+    # probleme qui n'existe peut-etre pas encore.
+    bandeau = re.search(r'<p class="overflow-note" id="overflow-note"([^>]*)>',
+                        html)
+    if bandeau is None:
+        errors.append("index.html: #overflow-note introuvable ou sans la classe "
+                      "overflow-note")
+    elif "hidden" not in bandeau.group(1):
+        errors.append("index.html: #overflow-note n'est pas masque au depart: le "
+                      "diagnostic s'afficherait avant meme qu'il y ait quoi que ce "
+                      "soit a signaler.")
+    else:
+        count += 1
+
+    return count
+
+
 def main():
     errors = []
     precache = check_precache(errors)
@@ -656,6 +901,7 @@ def main():
     confirm = check_confirm_paths(errors)
     son = check_sound_placement(errors)
     worker = check_service_worker(errors)
+    action = check_action_bar(errors)
 
     print("precache service worker : %d entrees" % precache)
     print("references dans HTML    : %d" % html_refs)
@@ -671,6 +917,7 @@ def main():
     print("marqueur de version   : %d" % marker)
     print("placement du son      : %d" % son)
     print("lectures du service wk: %d" % worker)
+    print("barre d'action et place: %d" % action)
 
     if errors:
         print()

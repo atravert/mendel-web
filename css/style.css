@@ -79,13 +79,24 @@ body {
   /* Hauteur utile, publiee par syncViewport() dans js/ui.js.
      Repli 100dvh, qui suffit sur Chrome: `interactive-widget=resizes-content`
      y retrecit le viewport de mise en page, et dvh suit. Sur iOS ce parametre
-     n'existe pas, dvh garde la hauteur de l'ecran, et les ecrans centres
-     -- accueil et resultat -- passent a moitie sous le clavier: c'est ce que
-     --app-height corrige. L'ecran de quiz, lui, ne se deplace pas: il est
-     ancre en haut, plus bas.
-     L'ordre compte, le second ecrasant le premier. */
-  min-height: 100dvh;
-  min-height: var(--app-height, 100dvh);
+     n'existe pas, dvh garde la hauteur de l'ecran, et l'ecran passe a moitie
+     sous le clavier: c'est ce que --app-height corrige.
+
+     `height` et NON `min-height`, et c'est la correction de fond. En
+     `min-height`, la coque pouvait GRANDIR au-dela de la hauteur visible:
+     c'etait alors le DOCUMENT qui defilait, et non `.screen`. Or tout ce
+     qu'on cherche a garantir -- la zone d'action en bas, le bandeau de mesure
+     -- depend de l'unique conteneur qui defile et de sa limite basse. Une
+     coque qui depasse, et il n'y a plus de bas: sur iOS, ou le viewport de
+     mise en page ne retrecit pas quand le clavier se leve, la zone d'action
+     se retrouve sous le clavier, donc a l'endroit exact ou elle ne rend aucun
+     service. La coque est calee sur la hauteur visible, et `.screen` defile. */
+  height: 100dvh;
+  height: var(--app-height, 100dvh);
+  /* Le seul conteneur qui defile est `.screen`. Sans cette ligne, le document
+     defilait aussi, et un decalage publie par le JS devrait corriger un
+     defilement que le CSS evite. */
+  overflow: hidden;
 
   /* Aucun decalage n'est applique, et c'est un choix calcule, pas un oubli.
 
@@ -117,16 +128,87 @@ body {
   flex-direction: column;
   flex: 1;
   gap: var(--gap);
-  /* Budget vertical de l'ecran de quiz, tout en min-heurs du CSS: 20 de marge
-     haute, 59 d'encoche, 4 intervalles de 16, 22 de progression, 20 de type,
-     53 d'enonce (une seule ligne: les enonces sont des symboles et des
-     formules), 48 de champ, 104 de barre, 12 de marge, 48 de bouton, 20 de
-     marge basse, soit 469 px. L'iPhone 15 laisse 508 px une fois le clavier
-     ouvert, l'indicateur d'accueil deduit: les trois tiennent ensemble a
-     l'ecran. Un iPhone SE n'en laisse que 407, d'ou le defilement. */
+  /* Seul le defilement de l'application. La coque est calee sur la hauteur
+     visible (voir plus haut), donc c'est ce conteneur qui deborde, et non
+     elle -- et c'est lui qui doit deborder, pour que la zone d'action, qui est
+     sa voisine, reste calee sur le bas de la zone visible. */
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* --------------------------------------------------------------------------
+   La barre d'action: toujours atteignable
+   -------------------------------------------------------------------------- */
+
+/* Valider puis Suivant, au meme endroit, dans le meme geste.
+
+   Enfant direct de `.shell`, donc simple element de flex au bas d'une coque
+   calee sur la hauteur visible et qui ne defile pas: la barre y reste quoi
+   qu'il arrive du contenu. C'est ce qui la rend atteignable, et non une
+   position calculee en pixels.
+
+   Ni `fixed` ni `sticky` n'y garantiraient cela. `fixed` exigerait de savoir
+   de combien le viewport de mise en page depasse la zone visible, et sur iOS
+   il ne retrecit PAS quand le clavier se leve: le calcul serait faux
+   precisement quand il compte. `sticky`, essaye ici d'abord, ne peut se
+   deplacer que dans la boite de son PARENT -- le formulaire. Le formulaire
+   etant plus bas que la zone visible des que le contenu deborde, c'est-a-dire
+   dans le cas meme a securiser, la barre ne pouvait pas remonter au-dessus de
+   lui et restait hors champ. Le symptome intact, avec une regle de plus.
+
+   `flex: 0 0 auto` est explicite: sans lui, un contenu long pourrait
+   compresser la barre. Les ecrans portent `flex: 1` et absorben donc tout
+   l'espace restant, et c'est EUX qui defilent. */
+.actions {
+  display: none;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: var(--gap);
+}
+
+html[data-screen='quiz'] .actions { display: flex; }
+
+/* Apres une reponse, l'enonce et le type de question s'effacent.
+
+   L'enonce est devenu redondant -- on vient d'y repondre -- et le commentaire
+   prend sa place (voir le HTML). Ce sont exactement les deux elements qui
+   disparaissent au moment ou la place manque: 17 px de type, 53 d'enonce, et
+   leurs intervalles.
+
+   `data-answered` est pose par validate() et retire par renderQuestion(). Ce
+   n'est pas un decor pour le test: c'est ce qui fait appliquer la regle au
+   premier rendu aussi, ou le seul HTML ne suffirait pas. */
+html[data-answered='1'] .question-type,
+html[data-answered='1'] .prompt { display: none; }
+
+/* Budget vertical de l'ecran de quiz, en min-heurs du CSS: 20 de marge
+   haute, 59 d'encoche, 4 intervalles de 16, 22 de progression, 20 de type,
+   53 d'enonce, 48 de champ, 104 de barre, 12 de marge, 48 de bouton, 20 de
+   marge basse, soit 469 px AVANT reponse.
+
+   La version precedente de ce commentaire annoncait 469 px de contenu pour
+   508 px disponibles sur un iPhone 15, et en deduisait que tout tenait a
+   l'ecran. Les deux chiffres avaient le meme defaut: ils etaient CALCULES,
+   jamais MESURES. Et le 469 px ne decrivait que l'etat AVANT reponse -- or
+   les deux elements qui dependent, le commentaire et le bouton Suivant,
+   n'existent qu'apres, et ils etaient les deux derniers du flux, donc les
+   deux premiers a sortir:
+
+       avant reponse    468 px
+       apres reponse   555 px (commentaire sur une ligne) a 601 px (sur
+                       trois, ce qui est le cas d'une mauvaise reponse: le
+                       retour ajoute "La bonne reponse etait : ...")
+
+   Le 508 px ne pouvait donc pas tenir: deficit de 47 a 93 px, SANS compter
+   un pixel de barre Safari. Un iPhone 15 Pro a refuse le calcul, et le
+   commentaire comme le bouton Suivant ont disparu de l'ecran.
+
+   On ne retente pas le calcul. La zone d'action est enfant de la coque, donc
+   au bas de la zone visible quelle que soit la hauteur reellement disponible;
+   le reste defile. S'il reste un debordement, il est AFFICHE par l'appareil
+   lui-meme (#overflow-note) au lieu d'etre devine ici. Voir P1, P3 et P5 dans
+   le README. */
 
 /* Centrage par marges automatiques sur le premier et le dernier enfant, et
    non par `justify-content: center`. Les deux centrent; un seul rend le
@@ -428,12 +510,41 @@ html[data-screen='quiz'] .sound-toggle {
    Retour et resultat
    -------------------------------------------------------------------------- */
 
+/* Le commentaire, dans l'emplacement qu'il partage avec l'enonce.
+
+   Les deux sont des paragraphes de meme nature, places l'un apres l'autre dans
+   `#screen-quiz`; quand l'enonce s'efface (regle `data-answered` plus haut),
+   celui-ci laisse exactement sa place a celui-la. Aucune position absolue,
+   aucune translation: la place se libere parce que l'element qui la prenait
+   n'est plus dans le flux. C'est ce qui rend le gain effectif: la place
+   rendue est la place reinvestie, au lieu d'etre un vide. */
 .feedback {
   margin: 0;
   font-size: 19px;
   font-weight: 700;
   text-align: center;
   white-space: pre-line;   /* le message d'echec contient un retour a la ligne */
+}
+
+/* Le debordement, mesure sur l'appareil.
+
+   Affiche UNIQUEMENT quand l'ecran deborde malgre la barre d'action collee.
+   Un diagnostic permanent serait du bruit qu'on finit par ne plus lire; un
+   diagnostic qui n'apparait que lorsqu'il y a un probleme ne peut pas etre
+   ignore. Voir P5 dans le README: les 508 px du CSS etaient calcules, et
+   l'appareil les a refuses. */
+.overflow-note {
+  margin: 0;
+  /* Comme la barre d'action: il occupe le bas de la coque et ne se fait pas
+     ecraser. Un diagnostic comprime a une ligne ne serait plus lisible, et un
+     diagnostic illisible n'est pas un diagnostic. */
+  flex: 0 0 auto;
+  padding: var(--gap) 0;
+  border-top: 1px solid var(--border);
+  color: var(--wrong);
+  font-size: 14px;
+  line-height: 1.3;
+  text-align: center;
 }
 
 .feedback--correct { color: var(--correct); }

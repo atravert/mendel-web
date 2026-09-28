@@ -13,7 +13,7 @@
 // un depot "mendel-web" est servi depuis /mendel-web/, donc sw.js doit y
 // etre a la racine et non dans un sous-dossier.
 
-const CACHE_VERSION = 'd83e6ffc';
+const CACHE_VERSION = '8b780e3d';
 
 const CACHE_NAME = `mendel-${CACHE_VERSION}`;
 

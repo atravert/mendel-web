@@ -147,6 +147,16 @@ check('l\'enonce est compose de texte simple', currentPrompt().indexOf('<') === 
   check('le focus ne quitte pas le champ a la validation',
     document.activeElement === input, true);
   check('Valider se verrouille', document.getElementById('validate-button').disabled, true);
+  // P1: `disabled` ne suffit pas. Le bouton se GRISAIT et restait en place,
+  // 48 px du budget vertical pour une action morte, exactement a l'endroit ou
+  // la place manquait. Deux boutons a l'ecran pour une seule action utile.
+  // Le masquage est ce qui rend les 48 px; le verrou reste pose a part.
+  check('Valider disparait, pas seulement grise',
+    document.getElementById('validate-button').hidden, true);
+  // P2: l'etat qui fait disparaitre l'enonce, et que le CSS lit pour le
+  // remplacer par le commentaire. Pose sur `<html>`, comme `data-screen`.
+  check("l'etat repondu est publie sur <html>",
+    document.documentElement.getAttribute('data-answered'), '1');
   check('le bouton Suivant apparait', document.getElementById('next-button').hidden, false);
   check('le bouton dit Suivant', document.getElementById('next-button').textContent,
     'Question suivante');
@@ -187,6 +197,9 @@ check('le curseur revient dans le champ, sans attendre',
   document.activeElement === input, true);
 check('le retour est masque', document.getElementById('feedback').hidden, true);
 check('le bouton Suivant est masque', document.getElementById('next-button').hidden, true);
+check('Valider revient, l\'enonce aussi', document.getElementById('validate-button').hidden, false);
+check("l'etat repondu est retire de <html>",
+  document.documentElement.getAttribute('data-answered'), undefined);
 ok('la question 2 est differente de la question 1', currentPrompt() !== firstPrompt);
 
 // ---------------------------------------------------------------------------
@@ -933,6 +946,22 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   const validate = document.getElementById('validate-button');
   const nextButton = document.getElementById('next-button');
 
+  // D'ABORD ce que voit le harnais, parce que les assertions suivantes n'ont
+  // aucun sens sinon.
+  //
+  // Les deux boutons vivent dans la zone d'action, pas dans l'ecran de quiz:
+  // c'est ce qui les sort du conteneur qui defile, pour qu'ils restent en bas
+  // de la zone visible. Le harnais le modelait encore comme le contraire, et
+  // les deux assertions ci-dessous restaient vertes parce que la parade du
+  // quiz les satisfaisait -- sur une page ou elle ne les voit plus. Un
+  // listener fantome dans le harnais, un vrai tremblement sur l'appareil.
+  const actions = document.getElementById('actions');
+  const quiz = document.getElementById('screen-quiz');
+  check('le harnais voit les boutons dans la zone d\'action',
+    validate._parent === actions, true);
+  check('le harnais ne les voit plus dans l\'ecran de quiz',
+    validate._parent === quiz, false);
+
   check('Valider bloque la prise de focus',
     validate.fire('pointerdown').defaultPrevented, true);
   check('Suivant bloque la prise de focus',
@@ -1047,4 +1076,106 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
     root.getAttribute('data-keyboard'), undefined);
   check('le curseur survit a la fermeture du clavier',
     document.activeElement === input, true);
+}
+
+// ---------------------------------------------------------------------------
+// Ce qui ne rentre pas: la mesure, lue sur l'appareil
+// ---------------------------------------------------------------------------
+
+// P5, et l'aveu qui va avec.
+//
+// Le CSS annoncait 469 px de contenu pour 508 px disponibles sur un iPhone 15,
+// et en deduisait que tout tenait. Les deux chiffres etaient CALCULES. Le
+// premier ne decrivait que l'etat AVANT reponse -- et les deux elements qui
+// dependent (le commentaire, le bouton Suivant) n'existent qu'apres, ou ils
+// pesaient 555 a 601 px. Un iPhone 15 Pro a refuse le calcul: le commentaire
+// et le bouton Suivant ont disparu de l'ecran.
+//
+// Aucune assertion de ce fichier n'aurait vu le defaut. Elles verifient que le
+// commentaire EXISTE et que Suivant est affiche -- les deux vrais. Elles ne
+// peuvent pas dire "c'est sous le clavier": seul un appareil peut le dire.
+//
+// Ce que ces tests verifient, et c'est tout: que l'application REAGIT
+// correctement a une mesure. Les deux nombres sont poses ici a la main, et
+// personne ne les calcule -- un test qui pretendrait mesurer la hauteur
+// simulerait exactement le defaut qu'il est cense attraper. Le vrai chiffre
+// reste a produire sur l'appareil.
+{
+  const quiz = screen('quiz');
+  const note = document.getElementById('overflow-note');
+  const root = document.documentElement;
+  const viewport = window.visualViewport;
+
+  // Le bloc precedent a relance une serie et referme le clavier. On est donc
+  // sur le quiz, question 1, sans reponse, et sans debordement annonce.
+  check('le bandeau de mesure est muet quand tout rentre',
+    note.hidden, true);
+  check("aucun etat 'repondu' au depart", root.getAttribute('data-answered'), undefined);
+
+  // Les 508 px que le CSS annoncaient, et les 601 px qu'il annoncait pas.
+  // C'est le couples qui a produit le symptome: un deficit de 93 px, qui
+  // emportait le commentaire et le bouton Suivant.
+  quiz.clientHeight = 508;
+  quiz.scrollHeight = 601;
+
+  // Le clavier seul ne suffit pas a le faire parler: il faut une nouvelle
+  // mesure. Passer par syncViewport et non par un rendu verifie qu'il mesure
+  // au bon moment -- a chaque changement de hauteur visible, pas seulement au
+  // changement de question, donc aussi a une rotation ou a une ouverture de
+  // clavier en cours de partie.
+  viewport.setKeyboard(508);
+  check('un debordement reel est signale', note.hidden, false);
+
+  // Les DEUX chiffres bruts, parce que "ca ne rentre pas" ne se corrige pas et
+  // "601 px pour 508 px" se corrige. C'est ce que l'utilisateur peut rapporter.
+  const texte = note.textContent;
+  check('le bandeau donne le contenu', texte.indexOf('601 px') !== -1, true);
+  check('le bandeau donne la place disponible', texte.indexOf('508 px') !== -1, true);
+  check('le bandeau donne le manque', texte.indexOf('93 px') !== -1, true);
+  check('le bandeau dit quoi faire', texte.indexOf('Defilez') !== -1, true);
+
+  // Ce qui tient exactement ne doit PAS etre signale. Ces hauteurs-la sont
+  // arrondies par le navigateur, et un demi-pixel de debordement n'a rien de
+  // reel: sans cette tolerance, le bandeau s'afficherait sur un ecran qui
+  // tient, et l'utilisateur finirait par l'ignorer -- c'est-a-dire par
+  // perdre le seul diagnostic qu'on lui donne.
+  quiz.scrollHeight = 508;
+  viewport.setKeyboard(508);
+  check('un ecran qui tient exactement reste muet', note.hidden, true);
+
+  quiz.scrollHeight = 509;
+  viewport.setKeyboard(508);
+  check('un pixel de debordement reste tolere', note.hidden, true);
+
+  quiz.scrollHeight = 511;
+  viewport.setKeyboard(508);
+  check('trois pixels, laTolerance est franchie', note.hidden, false);
+
+  // L'ecran de resultat n'a pas les memes contraintes: centre, court, et
+  // lisible en defilant. Signaler SON debordement dans le bandeau du quiz
+  // serait une fausse alerte sur un ecran ou rien n'est masque.
+  document.getElementById('change-button').fire('click');
+  check('l\'ecran de depart est affiche', visible('start'), true);
+  viewport.setKeyboard(508);
+  check('rien n\'est signale hors du quiz', note.hidden, true);
+
+  // Retour au quiz, et le bandeau doit revenir aussi. Sans cela, une mesure
+  // faite sur un autre ecran resterait affichee, et l'utilisateur verrait un
+  // avertissement qui ne parle plus de rien.
+  //
+  // On remet le contenu a 601 px d'abord: le test de tolerance a laisse
+  // 511, et c'est le scenario de l'iPhone 15 Pro qu'on veut retrouver, pas un
+  // debordement de trois pixels.
+  quiz.scrollHeight = 601;
+  startTopic('elements');
+  viewport.setKeyboard(508);
+  check('le bandeau revient des que le quiz est affiche', note.hidden, false);
+  // Les chiffres sont redeux ceux du quiz, et non un reste de l'ecran
+  // precedent: c'est ce qui distingue une mesure d'un message colle.
+  check('le bandeau retrace le manque mesure', note.textContent.indexOf('93 px') !== -1, true);
+
+  quiz.clientHeight = 0;
+  quiz.scrollHeight = 0;
+  viewport.setKeyboard(844);
+  check('plus de mesure, plus de bandeau', note.hidden, true);
 }

@@ -37,6 +37,21 @@ function makeElement(tag, id, doc) {
     dataset: {},
     attrs: {},
     children: [],
+    // Metriques de defilement, a zero par defaut.
+    //
+    // Le stub ne calcule aucune mise en page, donc il ne PEUT pas deduire une
+    // hauteur de contenu. Zero signifie "je ne sais pas", et
+    // `mesurerDebordement()` interpretsortie la dessus comme un ecran muet --
+    // le cas normal, celui ou rien ne deborde.
+    //
+    // Un test qui veut verifier l'affichage les pose lui-meme. C'est la seule
+    // facon honnete de simuler un telephone trop petit: personne ne calcule
+    // vraiment ces deux nombres ici, donc un stub qui les deduirait en
+    // inventerait une hauteur -- et le test passerait sur un chiffre que rien
+    // n'a mesure, ce qui est precisement le defaut que la fonction de mesure
+    // est venue corriger.
+    clientHeight: 0,
+    scrollHeight: 0,
     selectionStart: 0,
     selectionEnd: 0,
     focused: 0,
@@ -230,24 +245,39 @@ function createDocument(html, topicIds) {
     };
   }
 
-  // Les boutons de l'ecran de quiz sont enfants de l'ecran, qui porte le
-  // garde-fou `pointerdown` empechant le focus de quitter le champ.
-  const quizScreen = doc._elements['screen-quiz'];
-  if (quizScreen) {
+  // Les deux boutons d'action sont enfants de la ZONE D'ACTION, elle-meme
+  // enfant de la coque. Ils ne sont donc PAS dans #screen-quiz -- et c'est
+  // exactement pour ca qu'ils ont besoin de leur propre parade `pointerdown`.
+  //
+  // Ce lien est donc une fidelite, pas un detail. Il avait ete code
+  // `button._parent = quizScreen`, et l'assertion "Valider bloque la prise de
+  // focus" est restee verte quand le markup avait change: la parade du quiz
+  // la satisfait par un chemin qui n'existe plus sur l'appareil. Les deux
+  // listeners etaient alors dans le harnais, un seul sur la page, et rien ne
+  // pouvait le dire.
+  const actions = doc._elements['actions'];
+  if (actions) {
     for (const name of ['validate-button', 'next-button']) {
       const button = doc._elements[name];
       if (!button) continue;
-      button._parent = quizScreen;
+      button._parent = actions;
       // Comme les touches de la barre: un bouton se reconnait lui-meme a
       // `closest()`, sinon la parade de ui.js ne le verrait jamais.
       button.closest = (selector) => (selector === 'button' ? button : null);
     }
-    // L'ecran de quiz remonte jusqu'au document, comme dans un vrai DOM. Sans
-    // ce lien, un `keydown` pose sur un bouton n'atteindrait pas une ecoute
-    // posee sur le document -- et le garde-fou qui laisse un bouton focus a son
-    // propre clic ne serait jamais exerce.
-    quizScreen._parent = doc;
+    // La zone d'action remonte jusqu'au document, comme dans un vrai DOM. Le
+    // `<main class="shell">` et `<body>` intermediaires sont sautes: seul le
+    // dernier relai compte, et c'est deja ce qui est fait pour l'ecran de
+    // quiz et pour le champ.
+    actions._parent = doc;
   }
+
+  // L'ecran de quiz remonte jusqu'au document, comme dans un vrai DOM. Sans
+  // ce lien, un `keydown` pose sur un bouton n'atteindrait pas une ecoute
+  // posee sur le document -- et le garde-fou qui laisse un bouton focus a son
+  // propre clic ne serait jamais exerce.
+  const quizScreen = doc._elements['screen-quiz'];
+  if (quizScreen) quizScreen._parent = doc;
 
   // Le champ de reponse remonte jusqu'au document.
   //

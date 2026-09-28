@@ -84,14 +84,60 @@ function syncViewport() {
   const clavier = viewport.height < window.innerHeight - 80;
   if (clavier) root.setAttribute('data-keyboard', 'open');
   else root.removeAttribute('data-keyboard');
+
+  // La hauteur vient de changer, donc la place disponible vient de changer:
+  // c'est le moment ou un debordement apparait ou disparait. Le mesurer ici,
+  // et non seulement au rendu, evite un bandeau qui mentirait entre deux
+  // rotations ou deux ouvertures de clavier.
+  mesurerDebordement();
 }
 
-// Le scroll est ecoute avec le resize: sur iOS le deplacement de la barre
-// d'adresse retrecit le viewport sans emettre de `resize`.
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', syncViewport);
-  window.visualViewport.addEventListener('scroll', syncViewport);
-  syncViewport();
+/**
+ * Mesure, sur l'appareil, ce qui ne rentre pas dans la zone visible.
+ *
+ * C'est P5 dans le README, et l'existence meme de cette fonction est un aveu.
+ * Le CSS annoncait 469 px de contenu pour 508 px disponibles sur un iPhone 15:
+ * deux nombres CALCULES, jamais mesures. Le premier ne decrivait que l'etat
+ * avant reponse, alors que l'etat apres reponse demande jusqu'a 601 px. Un
+ * iPhone 15 Pro a refuse le calcul, et le commentaire comme le bouton Suivant
+ * ont disparu de l'ecran.
+ *
+ * Aucune assertion JS ne voit cela: elle verifierait que le commentaire
+ * EXISTE -- ce qui est vrai -- et jamais qu'il est sous le clavier. Seule une
+ * mesure, sur la machine qui echoue, peut le dire.
+ *
+ * Le bandeau n'apparait que s'il deborde. Permanent, il serait du bruit qu'on
+ * arrete de lire; conditionnel, il ne peut pas etre manque -- et il n'a rien a
+ * dire quand tout va bien.
+ */
+function mesurerDebordement() {
+  const bandeau = el.overflowNote;
+  const ecran = el.screens.quiz;
+  if (!bandeau) return;
+
+  // Sur un ecran masque, `clientHeight` et `scrollHeight` valent 0: leur
+  // difference vaut 0, donc le bandeau resterait muet PAR HASARD. On demande
+  // l'ecran de quiz nominativement, pour que son silence soit une decision.
+  if (ecran.hidden || !ecran.clientHeight) {
+    bandeau.hidden = true;
+    return;
+  }
+
+  // La tolerance d'un pixel: ces deux hauteurs sont arrondies, et un
+  // debordement d'un demi-pixel n'a rien de reel. Sans elle, le bandeau
+  // pourrait s'afficher sur un ecran qui tient exactement.
+  const debordement = ecran.scrollHeight - ecran.clientHeight;
+  if (debordement <= 1) {
+    bandeau.hidden = true;
+    return;
+  }
+
+  // Les deux chiffres bruts, parce que ce sont eux qu'il faut rapporter. Un
+  // "ca ne rentre pas" ne se corrige pas; "601 px pour 508 px" se corrige.
+  bandeau.textContent =
+    `Il manque ${debordement} px : ${ecran.scrollHeight} px de contenu pour `
+    + `${ecran.clientHeight} px visibles. Defilez pour lire le retour.`;
+  bandeau.hidden = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +174,8 @@ const el = {
   validateButton: document.getElementById('validate-button'),
   feedback: document.getElementById('feedback'),
   nextButton: document.getElementById('next-button'),
+  actions: document.getElementById('actions'),
+  overflowNote: document.getElementById('overflow-note'),
   resultComment: document.getElementById('result-comment'),
   resultScore: document.getElementById('result-score'),
   restartButton: document.getElementById('restart-button'),
@@ -138,6 +186,21 @@ const el = {
   versionStart: document.getElementById('version-start'),
   versionResult: document.getElementById('version-result'),
 };
+
+// Le scroll est ecoute avec le resize: sur iOS le deplacement de la barre
+// d'adresse retrecit le viewport sans emettre de `resize`.
+//
+// APRES `el`, et l'ordre n'est pas indifferent. `syncViewport()` mesure
+// immediatement -- la hauteur d'abord, puis le debordement -- donc elle lit
+// `el.overflowNote`; appelee plus tot, elle tomberait sur le `const` encore
+// non initialise, qui est une ReferenceError et non un `undefined` silencieux.
+// Le module ne se chargerait donc pas du tout, et l'ecran resterait vide
+// sans rien indiquer.
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncViewport);
+  window.visualViewport.addEventListener('scroll', syncViewport);
+  syncViewport();
+}
 
 // Les touches d'indice et d'exposant sont listees a part des touches
 // d'insertion: elles n'inserent rien, elles arment un mode.
@@ -206,10 +269,17 @@ function renderQuestion() {
   el.input.value = '';
   el.input.placeholder = inputHint(question);
   el.validateButton.disabled = true;   // rien a valider tant que le champ est vide
+  el.validateButton.hidden = false;    // le bouton mort rend la place a l'enonce
   el.feedback.hidden = true;
   el.feedback.textContent = '';
   el.feedback.className = 'feedback';
   el.nextButton.hidden = true;
+
+  // Symetrique de validate(): l'enonce et le type de question reviennent, et
+  // l'etat `data-answered` -- qui fait disparaitre le premier -- part avec.
+  // Les deux vont ensemble: n'en laisser qu'un des deux mettrait l'ecran dans
+  // un etat qui n'existe pas.
+  document.documentElement.removeAttribute('data-answered');
 
   el.symbolBar.hidden = !expectsFormula(question);
   setScript(null);
@@ -230,6 +300,12 @@ function renderQuestion() {
   // donc de ne jamais passer par une promesse ni par une minuterie -- ce que
   // startQuiz() ne fait pas.
   el.input.focus();
+
+  // Le focus vient d'etre pose, donc le clavier se leve -- ou va se lever. La
+  // hauteur visible n'est donc pas encore celle de l'etat qui vient d'etre
+  // affiche, et c'est le meilleur moment pour mesurer: ce qui sera visible
+  // dans une seconde l'est deja, et c'est precisement ce qui compte.
+  mesurerDebordement();
 }
 
 function renderFeedback(correct) {
@@ -309,8 +385,25 @@ function validate() {
   // Le verrou n'a pas besoin d'eux. `state.answered` tient deja la reponse
   // comptee, et `validate()` s'y arrete: retaper ne recompte rien. Le champ
   // reste donc saisissable apres la reponse -- ce qui n'a rien de geneant,
-  // puisque Valider est deactive et que Suivant efface tout.
+  // puisque Suivant efface tout.
   el.validateButton.disabled = true;
+
+  // Le bouton Valider disparait au lieu de se griser. C'est P1 dans le README.
+  //
+  // `disabled` le rendait gris et le LAISSAIT en place: 48 px du budget
+  // vertical pour une action morte, a l'endroit exact ou la place manquait.
+  // Deux boutons a l'ecran alors qu'un seul fait quelque chose, c'est aussi
+  // deroutant. Les deux occupaient la meme place dans la barre d'action, donc
+  // en masquer un revient a zero.
+  //
+  // `disabled` reste pose malgre le masquage: c'est le verrou reel, et il doit
+  // tenir meme si quelque chose reapparait le bouton par erreur.
+  el.validateButton.hidden = true;
+
+  // L'etat passe par le `<html>` plutot que par une classe sur l'ecran, pour
+  // que le CSS masque l'enonce sans connaitre la structure de
+  // `#screen-quiz`. Meme choix que `data-screen`, et pour la meme raison.
+  document.documentElement.setAttribute('data-answered', '1');
 
   if (correct) sound.playCorrect();
   else sound.playWrong();
@@ -327,6 +420,11 @@ function validate() {
   // fois. Deux sautes par question, exactement ce que "le clavier ne bouge
   // plus" exclut. Le focus reste dans le champ, et l'ecouteur `pointerdown`
   // plus bas empeche meme le navigateur de le lui prendre.
+
+  // La forme du contenu vient de changer d'une centaine de px -- l'enonce a
+  // disparu, le bouton Valider aussi. C'est donc le moment ou la hauteur
+  // disponible compte le plus, et le moment ou il faut la MESURER.
+  mesurerDebordement();
 }
 
 function next() {
@@ -610,6 +708,27 @@ el.screens.quiz.addEventListener('pointerdown', (event) => {
 // vient d eliminer, et par la meme cause.
 el.soundToggle.addEventListener('pointerdown', (event) => {
   event.preventDefault();
+});
+
+// Et meme parade pour les DEUX boutons d'action, pour la meme raison que le
+// bouton son: ils sont visuellement dans l'ecran de quiz, mais ils n'en sont
+// pas les descendants. Ils vivent dans la zone d'action, enfant de la coque,
+// pour etre hors du conteneur qui defile et donc toujours au bas de la zone
+// visible (voir P3 dans le README). La parade portee par #screen-quiz ne les
+// voit donc pas.
+//
+// Sans elle, Valider et Suivant reprennent le focus, le champ le perd, le
+// clavier se ferme, le viewport passe de 508 a 844 px, et tout l'ecran saute --
+// c'est-a-dire exactement le defaut que la parade vient d eliminer, revenu par
+// la porte de la correction.
+//
+// Le motif est donc general: tout bouton visible dans l'ecran de quiz mais
+// place ailleurs dans l'arbre doit porter sa parade. Les deux conteneurs
+// concernes sont ici, et chacun a la sienne. Les reprendre serait faire
+// revenir le tremblement sans qu'aucune assertion ne le voie: elles verifient
+// la parade sur son conteneur, pas sa portee.
+el.actions.addEventListener('pointerdown', (event) => {
+  if (event.target.closest('button')) event.preventDefault();
 });
 
 for (const key of el.symbolBar.querySelectorAll('[data-insert]')) {
