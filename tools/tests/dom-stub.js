@@ -62,6 +62,7 @@ function makeElement(tag, id, doc) {
     },
 
     setAttribute(name, val) { this.attrs[name] = String(val); },
+    removeAttribute(name) { delete this.attrs[name]; },
     getAttribute(name) { return this.attrs[name]; },
     querySelector(selector) { return makeElement('span', '', doc); },
     querySelectorAll() { return []; },
@@ -301,6 +302,10 @@ function createWindow(doc) {
       getItem(key) { return Object.prototype.hasOwnProperty.call(this._data, key) ? this._data[key] : null; },
       setItem(key, value) { this._data[key] = String(value); },
     },
+    // Hauteur de la fenetre, hors clavier: c'est la reference contre laquelle
+    // syncViewport() deduit qu'un clavier est ouvert. Suit le viewport, donc
+    // le navigateur seul le retrecit, pas la vue visuelle.
+    innerHeight: 844,
     matchMedia: (query) => ({ matches: false, media: query }),
     addEventListener: () => {},
     location: { protocol: 'file:', hostname: '', href: '' },

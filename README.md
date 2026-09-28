@@ -31,8 +31,8 @@ Trois contrôles, tous exécutables sans rien installer :
 | Commande | Ce qu'elle fait |
 |---|---|
 | `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. |
-| `make test` | 235 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
-| `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS. |
+| `make test` | 249 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
+| `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS, ancrage du centrage, marge de l'indicateur d'accueil. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
 
 Le harnais a deux extensions qui méritent d'être connues, parce qu'elles
@@ -204,10 +204,11 @@ utilisateur — c'est une règle de sécurité, pas une limite d'iOS. Toute la
 difficulté est là : il faut donc que chaque apparition du clavier soit
 consécutive à un vrai clic, et que rien ne l'interrompe ensuite.
 
-### Les quatre causes du clavier qui bouge
+### Les cinq causes du clavier qui bouge
 
-Elles sont toutes dans le chemin *valider → suivant*, et aucune ne se voyait
-sans téléphone.
+Les quatre premières sont toutes dans le chemin *valider → suivant*, et aucune
+ne se voyait sans téléphone. La cinquième est ailleurs : elle est dans la mise
+en page, et elle se voyait à tous les coups.
 
 **1. Le focus était volé au champ.** `validate()` finissait par
 `nextButton.focus()`. Un bouton qui prend le focus vide le champ, le clavier
@@ -244,6 +245,57 @@ le focus ne lâche pas. À la dernière question, en revanche, il doit lâcher :
 laisser le focus dans un champ devenu invisible est un état que le navigateur
 interprète mal, et le clavier resterait levé par-dessus l'écran de résultat.
 
+**5. Le contenu était centré, donc l'ouverture du clavier le déplaçait.**
+L'écran de quiz se centr verticalement dans la hauteur disponible. Or cette
+hauteur passe de 844 à 508 px dès que le clavier se lève : le contenu se déplace
+de la moitié de la différence, soit 168 px, vers le haut. C'est le « poussage »
+signalé, et il tombe au moment précis où le joueur commence à lire sa question.
+
+Ancrer l'écran de quiz **en haut** supprime le couplage : la position ne dépend
+plus de la hauteur. Changer `--app-height` ne déplace plus ni l'énoncé, ni le
+bloc de saisie, ni le bouton Valider. Ils restent à la même place, du premier
+geste de la série au dernier.
+
+Il restait 34 px à unforesevoir : la marge de l'indicateur d'accueil. Elle n'est
+utile que **sans** clavier — le clavier la recouvre, elle devient du vide.
+`syncViewport()` la déduit de la hauteur visible et pose `data-keyboard="open"`,
+ce qui remet la marge à zéro. Le contenu de l'écran de quiz passe alors de
+503 à 469 px, pour 508 px visibles sur un iPhone 15 : l'énoncé, le champ et
+Valider tiennent ensemble à l'écran, avec 39 px d'air.
+
+Le seuil de 80 px départage le clavier de la barre d'adresse d'iOS, qui
+rétracte la fenêtre de 90 px sans qu'aucun clavier n'existe à l'écran.
+
+Le prix de l'ancrage : sans clavier, le contenu occupe le haut de l'écran et le
+bas reste vide. C'est acceptable parce que le clavier ouvert est l'état normal
+d'une série — c'est tout l'objet de la demande — et que l'état sans clavier
+n'est visible que sur les deux autres écrans, qui restent centrés.
+
+### La touche retour du clavier
+
+`enterkeyhint="done"` fait que la touche retour du clavier soumet le
+formulaire : elle valait donc déjà la réponse. Ce qui manquait était la
+moitié suivante — **une fois la réponse comptée, la même touche passe à la
+question suivante.**
+
+```js
+el.form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (state.answered) next();
+  else validate();
+});
+```
+
+C'est le geste le plus répété de la série. Lui faire viser le bouton Suivant
+entre les deux multipliait les manipulations par deux : lever le doigt, viser,
+poser. Un seul geste à la place.
+
+`state.answered` fait toute l'arbitrage, et il fait aussi le garde-fou : le
+point gagné une fois ne peut pas être recompte, quelle que soit la touche. Le
+clic sur Valider garde son sens unique — le bouton est `disabled` après
+validation, donc rien n'arrive si on le touche. Seule la touche du clavier peut
+enchaîner, ce qui évite qu'un second clic fasse sauter une question par mégarde.
+
 ### Ce qui est vérifié, et comment
 
 Le harnais n'a **aucune minuterie**, délibérément. Avec un `setTimeout`, un
@@ -266,22 +318,52 @@ parade vérifiée dans le vide n'est pas vérifiée.
 | Valider et Suivant ne prennent pas le focus | `pointerdown` annulé, `click` non |
 | la parade ne porte pas sur le champ | sinon iOS refuserait le clavier |
 | la fin de série est la seule sortie du focus | `activeElement !== input` |
+| la touche retour valide | `feedback--correct`, commentaire visible |
+| la touche retour passe ensuite à la suivante | l'énoncé change, champ vidé |
+| la touche retour ne recompte pas | score identique avant et après |
+| un retour à vide ne fait rien | ni validation ni passage |
+| l'énoncé ne bouge pas quand la hauteur change | `.screen-quiz` sans marge auto |
+| la barre d'adresse n'est pas un clavier | `data-keyboard` absent à 790 px |
+| l'indicateur d'accueil s'écarte avec le clavier | `data-keyboard="open"` à 508 px |
 
-Huit régressions ont été introduites puis vérifiées comme détectées : le focus
+Seize régressions ont été introduites puis vérifiées comme détectées : le focus
 volé par Suivant, le champ `disabled` après validation, le focus reporté d'une
 micro-tâche, la parade retirée, la parade restreinte à un seul bouton,
-`readOnly` réintroduit, le `blur()` de fin de série retiré, et le focus de
-`renderQuestion()` supprimé.
+`readOnly` réintroduit, le `blur()` de fin de série retiré, le focus de
+`renderQuestion()` supprimé, la touche retour réduite à une validation, la
+touche retour avancée sans avoir validé, l'écran de quiz recentré,
+l'`auto` remonté sur le quiz, la marge d'accueil non remise à zéro,
+l'attribut renommé d'un seul côté, la variable non consommée, l'écran de
+résultat décentré, et le retour à `justify-content: center`.
+
+Trois de ces contrôles ont eux-mêmes eu besoin d'être repris, parce qu'ils
+passaient au vert sur du CSS absent :
+
+- une recherche de texte enchaînait la queue d'un sélecteur au corps de la
+  règle **suivante** ; les règles sont désormais parsées en `{selecteur: corps}`;
+- la valeur de `--safe-bottom` n'était pas vérifiée, seulement son nom —
+  `--safe-bottom: 34px` cite la variable et ne rend pas un pixel ;
+- une comparaison à un nom écrit en dur (`screen == "keyboard"`) avait dérivé
+  du vrai nom et **saute le test en silence**. Un test par attribut croisé vaut
+  mieux qu'une comparaison à une constante.
 
 ### Ce qui reste à l'appareil
 
 Le simulateur garantit que le code **pose le focus dans le geste et ne le
-lâche pas**. Il ne peut pas garantir que le système d'exploitation lève le
-clavier sur un `focus()` synchrone — c'est le seul point que seule une
-vérification sur l'appareil peut trancher. Si le clavier ne se lève toujours
-pas à l'ouverture de la série, le prochain remède est de faire la première
-question au `touchend` plutôt qu'au `click`, qui est le geste que le
-navigateur reconnaît sans ambiguïté.
+lâche pas**, et que la mise en page est écrite pour ne pas dépendre de la
+hauteur. Il ne peut pas garantir deux choses que seul un téléphone tranche :
+
+- que le système d'exploitation lève le clavier sur un `focus()` synchrone.
+  Si le clavier ne se lève toujours pas à l'ouverture de la série, le prochain
+  remède est de faire la première question au `touchend` plutôt qu'au `click`,
+  qui est le geste que le navigateur reconnaît sans ambiguïté.
+- que l'énoncé, le champ et Valider tiennent ensemble à l'écran une fois le
+  clavier levé. Le calcul dit 469 px de contenu pour 508 px visibles sur un
+  iPhone 15, donc 39 px d'air — mais il n'a pas été mesuré sur un appareil.
+  Sur un iPhone SE il n'y a que 407 px : le contenu déborde de 62 px et
+  `.screen` défile. C'est le seul écran où l'invariant « rien ne bouge » se
+  heurte à la taille de l'écran, pas au clavier.
+
 ## Structure
 
 ```
@@ -480,13 +562,24 @@ main : c'est un miroir maintenance de `index.html`, donc une source de dérive.
 elles divergent, pour que les tests ne puissent pas passer sur une barre qui
 n'existe pas à l'écran.
 
-Et `tools/verify.py` couvre les deux autres contrats qu'aucun test JS ne peut
-voir, parce qu'ils sont écrits dans un autre langage :
+Et `tools/verify.py` couvre les autres contrats qu'aucun test JS ne peut voir,
+parce qu'ils sont écrits dans un autre langage :
 
 - `--app-height` est un nom partagé entre `js/ui.js` et `css/style.css`, et
   aucun test ne le voit. `make verify` vérifie qu'il est publié d'un côté,
   consommé de l'autre, et qu'il garde une valeur de repli — sans quoi la page
   vaudrait zéro pixel de haut pendant le premier rendu.
-- `.screen` ne centre pas par `justify-content` et garde ses marges
-  automatiques. Les deux centrent ; un seul rend le débordement atteignable.
+- `#screen-quiz` ne porte **aucune** marge automatique : c'est ce qui l'ancre
+  en haut et rend sa position insensible à l'ouverture du clavier. Les écrans
+  d'accueil et de résultat, eux, doivent garder la leur, et aucun des trois ne
+  doit centrer par `justify-content` — les deux centrent, un seul rend le
+  débordement atteignable.
+- `data-keyboard` est posé par `js/ui.js` et consommé par `css/style.css` pour
+  remettre `--safe-bottom` à zéro. Même nature de contrat, et cette fois la
+  **valeur** est vérifiée : `--safe-bottom: 34px` cite la variable et ne rend
+  pas un pixel.
+
+Ces contrôles passent au vert sur du CSS absent, ce qui est leur mode de panne
+préféré. D'où le `parse_rules()` : apparier du texte enchaîne un jour la queue
+d'un sélecteur au corps de la règle suivante, et la règle manquante passe.
 

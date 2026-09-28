@@ -73,8 +73,10 @@ body {
   /* Hauteur utile, publiee par syncViewport() dans js/ui.js.
      Repli 100dvh, qui suffit sur Chrome: `interactive-widget=resizes-content`
      y retrecit le viewport de mise en page, et dvh suit. Sur iOS ce parametre
-     n'existe pas, dvh garde la hauteur de l'ecran, et le contenu centre
-     descend a moitie sous le clavier: c'est ce que --app-height corrige.
+     n'existe pas, dvh garde la hauteur de l'ecran, et les ecrans centres
+     -- accueil et resultat -- passent a moitie sous le clavier: c'est ce que
+     --app-height corrige. L'ecran de quiz, lui, ne se deplace pas: il est
+     ancre en haut, plus bas.
      L'ordre compte, le second ecrasant le premier. */
   min-height: 100dvh;
   min-height: var(--app-height, 100dvh);
@@ -92,10 +94,15 @@ body {
      Le defilement reste celui du navigateur, et .screen defile lui-meme quand
      c'est necessaire (voir plus bas). */
 
+  /* L'indicateur d'accueil du bas n'est utile que SANS clavier: le clavier le
+     recouvre, et sa marge devient 34 px perdus -- assez pour faire deborder
+     l'ecran de quiz sur un petit telephone. `data-keyboard` est pose par
+     syncViewport(), qui sait comparer la hauteur visible a la hauteur de la
+     fenetre. */
   padding:
     calc(var(--pad) + env(safe-area-inset-top))
     calc(var(--pad) + env(safe-area-inset-right))
-    calc(var(--pad) + env(safe-area-inset-bottom))
+    calc(var(--pad) + var(--safe-bottom, env(safe-area-inset-bottom)))
     calc(var(--pad) + env(safe-area-inset-left));
 }
 
@@ -104,35 +111,56 @@ body {
   flex-direction: column;
   flex: 1;
   gap: var(--gap);
-
-  /* Les trois ecrans se partagent la hauteur, pour que le bouton de bas
-     reste au meme endroit quelle que soit l'etape.
-
-     Le centrage se fait par marges automatiques sur le premier et le dernier
-     enfant, et non par `justify-content: center`. La difference n'a rien de
-     cosmetique: `justify-content: center` CENTRE AUSSI un contenu trop grand,
-     et la moitie haute part hors de la boite sans qu'aucun defilement n'y
-     mene. Les marges automatiques, elles, se reduisent a zero des que le
-     contenu deborde, et le contenu commence alors en haut -- atteignable.
-
-     C'est le cas reel ici. Budget vertical de l'ecran quiz, tout en
-     min-heurs du CSS: 20+20 de marge, 59 d'encoche, 34 d'indicateur, 4
-     intervalles de 16, 22 de progression, 20 de type, 53 d'enonce (une seule
-     ligne, les enonces etant des symboles et des formules), 48 de champ,
-     104 de barre, 12 de marge, 48 de bouton: 503 px. L'iPhone 15 laisse
-     508 px une fois le clavier ouvert, donc 4 px de marge -- juste. Un iPhone
-     SE n'en laisse que 407: 96 px de debordement.
-
-     `overflow-y: auto` rend ce debordement atteignable plutot que tronque. */
+  /* Budget vertical de l'ecran de quiz, tout en min-heurs du CSS: 20 de marge
+     haute, 59 d'encoche, 4 intervalles de 16, 22 de progression, 20 de type,
+     53 d'enonce (une seule ligne: les enonces sont des symboles et des
+     formules), 48 de champ, 104 de barre, 12 de marge, 48 de bouton, 20 de
+     marge basse, soit 469 px. L'iPhone 15 laisse 508 px une fois le clavier
+     ouvert, l'indicateur d'accueil deduit: les trois tiennent ensemble a
+     l'ecran. Un iPhone SE n'en laisse que 407, d'ou le defilement. */
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
-/* Auto-marges: l'espace libre va au debut et a la fin, donc le contenu est
-   centre; et quand il n'y a pas d'espace libre, elles valent zero et le
-   contenu demarre en haut. */
-.screen > :first-child { margin-block-start: auto; }
-.screen > :last-child { margin-block-end: auto; }
+/* Centrage par marges automatiques sur le premier et le dernier enfant, et
+   non par `justify-content: center`. Les deux centrent; un seul rend le
+   debordement atteignable. `justify-content: center` centre AUSSI un contenu
+   trop grand, dont la moitie haute sort du cadre sans qu'aucun defilement n'y
+   mene. Les marges automatiques se reduisent a zero des que le contenu
+   deborde: il demarre alors en haut, et reste entierement atteignable.
+
+   Reserve aux ecrans d'accueil et de resultat, qui sont courts et dont la
+   position n'a pas a etre stable. L'ecran de quiz s'ancre en haut, plus bas. */
+#screen-start > :first-child,
+#screen-result > :first-child { margin-block-start: auto; }
+#screen-start > :last-child,
+#screen-result > :last-child { margin-block-end: auto; }
+
+/* L'ecran de quiz est ancre en HAUT, et c'est ce qui rend la position de ses
+   elements insensible a l'ouverture du clavier.
+
+   Le centrage vertical lie la position du contenu a la hauteur disponible. Or
+   cette hauteur change des que le clavier se leve: 844 px deviennent 508 px,
+   et tout le contenu se deplace de la moitie de la difference, soit 168 px.
+   C'est ce poussage vers le haut, et il tombe precisement au moment ou le
+   joueur commence a lire la question.
+
+   Ancre en haut, la position ne depend plus de la hauteur. Changer
+   `--app-height` ne deplace ni l'enonce, ni le bloc de saisie, ni le bouton
+   Valider: ils restent la ou ils etaient, du premier geste de la serie au
+   dernier. C'est la demande, litteralement.
+
+   Le prix: sans clavier, le contenu occupe le haut de l'ecran et le bas
+   reste vide. C'est acceptable parce que le clavier ouvert est l'etat normal
+   d'une serie -- c'est tout l'objet de la demande -- et que l'etat sans
+   clavier n'est visible que sur les deux autres ecrans, centres. */
+#screen-quiz > :first-child,
+#screen-quiz > :last-child { margin-block: 0; }
+
+/* Clavier ouvert: l'indicateur d'accueil est dessous, sa marge est du vide.
+   Les 34 px gagnes font tenir l'enonce, le champ et Valider ensemble sur un
+   iPhone 15, la ou il manquait 5 px. */
+html[data-keyboard='open'] { --safe-bottom: 0px; }
 
 /* --------------------------------------------------------------------------
    Bouton son, toujours en haut a droite, comme sur les deux natives

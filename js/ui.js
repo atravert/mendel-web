@@ -69,8 +69,21 @@ import * as sound from './audio.js';
 function syncViewport() {
   const viewport = window.visualViewport;
   if (!viewport) return;
-  document.documentElement.style.setProperty(
-    '--app-height', viewport.height + 'px');
+
+  const root = document.documentElement;
+  root.style.setProperty('--app-height', viewport.height + 'px');
+
+  // Clavier ouvert ou non? La hauteur visible suffit: sans clavier elle vaut
+  // la hauteur de la fenetre, avec elle elle est nettement plus basse. Le
+  // seuil de 80 px couvre la barre d'adresse d'iOS, qui retracte la fenetre
+  // de 90 px sans qu'aucun clavier n'existe.
+  //
+  // Ce n'est qu'un indicateur de mise en page -- zeroer la marge de l'indicateur
+  // d'accueil, que le clavier recouvre. Mais c'est 34 px, et 34 px suffisaient
+  // a faire deborder l'ecran de quiz sur un petit telephone.
+  const clavier = viewport.height < window.innerHeight - 80;
+  if (clavier) root.setAttribute('data-keyboard', 'open');
+  else root.removeAttribute('data-keyboard');
 }
 
 // Le scroll est ecoute avec le resize: sur iOS le deplacement de la barre
@@ -469,9 +482,28 @@ for (const button of document.querySelectorAll('[data-topic]')) {
   button.addEventListener('click', () => startQuiz(button.dataset.topic));
 }
 
+/**
+ * La touche retour du clavier est a la fois Valider et Question suivante.
+ *
+ * `enterkeyhint="done"` fait que le clavier entree soumet le formulaire, donc
+ * que `validate()` s'execute -- c'etait deja le cas. Ce qui manquait: une fois
+ * la reponse comptee, la meme touche doit passer a la question suivante. Sans
+ * ca, il faut lever le doigt, viser le bouton Suivant, poser le doigt: trois
+ * gestes la ou un seul suffit, et c'est le geste le plus repete de la serie.
+ *
+ * Le champ n'etant plus `disabled` apres validation, la soumission peut
+ * revenir autant de fois que l'utilisateur veut: c'est `state.answered` qui
+ * rend l'operation idempotente, et c'est lui qui distingue les deux etats.
+ *
+ * Le clic sur Valider garde son sens unique: le bouton est desactive apres
+ * validation, donc rien n'arrive si on le touche. Seule la touche du clavier
+ * peut enchainer, ce qui evite qu'un second clic fasse sauter une question
+ * par megarde.
+ */
 el.form.addEventListener('submit', (event) => {
   event.preventDefault();
-  validate();
+  if (state.answered) next();
+  else validate();
 });
 
 el.nextButton.addEventListener('click', next);

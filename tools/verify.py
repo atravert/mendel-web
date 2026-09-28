@@ -265,31 +265,153 @@ def check_viewport(errors):
     return count
 
 
-def check_centering(errors):
-    """`.screen` ne doit pas centrer par `justify-content`, mais par marges.
+def parse_rules(css):
+    """Les regles de `css`, sous la forme {selecteur: corps}.
 
-    Les deux centrent. Un seul rend le debordement atteignable. Avec
-    `justify-content: center`, un contenu plus grand que la boite est centre
-    quand meme: le haut sort du cadre, et aucun defilement n'y conduit plus.
-    C'est invisible sans telephone, et le contenu deborde reellement des que
-    le clavier est ouvert sur un petit ecran (503 px de contenu pour 407 px
-    visibles sur un iPhone SE).
+    Un dict, et non une recherche de texte: les selecteurs et les corps se
+    recouvrent, et un motif qui enchaine les deux finit toujours par
+    apparier la queue d'un selecteur au corps de la regle SUIVANTE. C'est
+    arrive ici, et le controle passait au vert sur une regle absente.
+
+    Les regles imbriquees (`@media`) portent des `{` dans leur partie
+    selecteur: on les ignore plutot que de les deformer.
     """
-    css = strip_comments(read("css/style.css"))
-    block = re.search(r"^\.screen\s*\{(.*?)^\}", css, re.S | re.M)
-    if not block:
+    regles = {}
+    for selecteurs, corps in re.findall(r"([^{}]+)\{([^}]*)\}", css):
+        selecteurs = selecteurs.strip()
+        if "{" in selecteurs or selecteurs.startswith("@"):
+            continue
+        for selecteur in selecteurs.split(","):
+            regles[selecteur.strip()] = corps
+    return regles
+
+
+def check_centering(errors):
+    """L'ecran de quiz s'ancre en haut; les deux autres se centrent.
+
+    Ce n'est plus une question de gout, c'est l'invariant qui tient la
+    position des elements a l'ecran pendant toute une serie.
+
+    Le centrage vertical lie la position du contenu a la hauteur disponible,
+    et cette hauteur change des que le clavier se leve: 844 px deviennent
+    508 px, et le contenu se deplace de la moitie de la difference, soit
+    168 px -- exactement le poussage vers le haut signale. Ancre en haut, la
+    position ne depend plus de la hauteur: ni l'enonce, ni le bloc de saisie,
+    ni Valider ne bougent du premier geste au dernier.
+
+    L'ancre passe par l'absence de marges automatiques: `margin-block-start:
+    auto` sur le premier enfant est exactement ce qui recentre. On verifie
+    donc l'absence de ces marges sur l'ecran de quiz, et leur presence sur les
+    deux autres -- qui, eux, doivent rester centres.
+
+    Et sur les trois, pas de `justify-content: center`: les deux centrent, un
+    seul rend le debordement atteignable. Avec `justify-content`, un contenu
+    plus grand que la boite est centre quand meme, le haut sort du cadre, et
+    aucun defilement n'y conduit plus. C'est invisible sans telephone, et le
+    debordement est reel des que le clavier s'ouvre sur un petit ecran.
+    """
+    regles = parse_rules(strip_comments(read("css/style.css")))
+
+    ecran = regles.get(".screen")
+    if ecran is None:
         errors.append("style.css: regle .screen introuvable")
         return 0
-
-    body = block.group(1)
-    if re.search(r"justify-content\s*:\s*[^;]*\bcenter\b", body):
+    if re.search(r"justify-content\s*:\s*[^;]*\bcenter\b", ecran):
         errors.append("style.css: .screen centre par justify-content: le contenu "
                       "trop grand devient inatteignable. Utiliser les marges "
-                      "automatiques du premier et du dernier enfant.")
-    for edge in ("margin-block-start: auto", "margin-block-end: auto"):
-        if edge not in css:
-            errors.append("style.css: .screen n'a pas `%s`, il ne sera plus centre" % edge)
-    return 1
+                      "automatiques.")
+
+    count = 0
+    # Les ecrans centres: les marges automatiques doivent rester la.
+    for screen in ("start", "result"):
+        count += 1
+        # Le premier enfant porte la marge haute, le dernier la marge basse:
+        # c'est la paire qui centre. Verifier les deux marges sur les deux
+        # enfants serait faux, et le serait pour une bonne raison -- une
+        # seule des deux suffit a recentrer.
+        for bord, cote in (("first", "start"), ("last", "end")):
+            selecteur = "#screen-%s > :%s-child" % (screen, bord)
+            corps = regles.get(selecteur)
+            if corps is None:
+                errors.append("style.css: %s introuvable, #screen-%s ne sera "
+                              "plus centre" % (selecteur, screen))
+            elif "margin-block-%s: auto" % cote not in corps:
+                errors.append("style.css: %s n'a pas `margin-block-%s: auto`, "
+                              "#screen-%s ne sera plus centre"
+                              % (selecteur, cote, screen))
+
+    # L'ecran de quiz: pas de marge automatique, donc ancre en haut.
+    quiz = [regles.get("#screen-quiz > :%s-child" % b) for b in ("first", "last")]
+    if any(corps is None for corps in quiz):
+        errors.append("style.css: regle d'ancrage pour #screen-quiz introuvable")
+    else:
+        count += 1
+        for selecteur, corps in zip(("#screen-quiz > :first-child",
+                                     "#screen-quiz > :last-child"), quiz):
+            if re.search(r"margin-block\S*\s*:\s*auto", corps):
+                errors.append("style.css: %s porte des marges automatiques: le "
+                              "clavier qui s'ouvre le recentre et deplace toute la "
+                              "question. Ancrer en haut." % selecteur)
+            if "margin-block: 0" not in corps:
+                errors.append("style.css: %s n'a pas `margin-block: 0`, "
+                              "l'ancrage en haut n'est pas explicite" % selecteur)
+    return count
+
+
+def check_keyboard_inset(errors):
+    """`data-keyboard` doit mettre la marge de l'indicateur d'accueil a zero.
+
+    Meme nature de contrat que --app-height: ui.js pose l'attribut, style.css
+    la consomme, et aucun test ne voit le CSS. Une faute de frappe d'un côté
+    laisse la suite verte et la marge intacte -- donc 34 px repris d'un coup,
+    et 34 px qui suffisaient a faire deborder l'ecran de quiz sur un petit
+    telephone. Sans la detection, l'enonce, le champ et Valider ne tiennent
+    plus ensemble a l'ecran, ce qui est l'autre demande.
+
+    On verifie les trois maillons: ui.js pose l'attribut sous le bon nom,
+    style.css lit cet attribut, et .shell consomme bien la variable.
+    """
+    src = strip_comments(read("js/ui.js"))
+    css = strip_comments(read("css/style.css"))
+
+    # `data-` dans le motif, et non dans le suffixe: sinon `aria-pressed` est
+    # pris pour un attribut de donnees, et signale une regle manquante a tort.
+    posers = set(re.findall(r"setAttribute\(\s*'(data-[\w-]+)'", src))
+    # Meme forme des deux cotes, `data-` inclus, pour que la comparaison soit
+    # une simple egalite de noms.
+    lus = set(re.findall(r"\[(data-[\w-]+)=", css))
+
+    count = 0
+    for attr in sorted(posers):
+        count += 1
+        if attr not in lus:
+            errors.append("style.css: %s pose par ui.js, lu par aucune regle" % attr)
+
+    var = re.search(r"var\((--safe-bottom),\s*env\(safe-area-inset-bottom\)\)", css)
+    if not var:
+        errors.append("style.css: .shell ne retombe pas sur env(safe-area-inset-bottom) "
+                      "quand le clavier est ferme")
+    else:
+        count += 1
+        # Sur chaque attribut que ui.js pose, on cherche la regle qui le
+        # consomme ET la valeur qu'elle donne. Un test par attribut, plutot
+        # qu'une comparaison a un nom ecrit en dur: un nom ecrit en dur peut
+        # deriver du vrai et sauter le test en silence, ce que la premiere
+        # version faisait exactement.
+        #
+        # Et c'est la VALEUR qui compte, pas le nom: `--safe-bottom: 34px`
+        # cite la variable, passe le test naif, et ne rend pas un pixel.
+        for attr in sorted(posers & lus):
+            regle = re.search(r"\[%s[^\]]*\]\s*\{([^}]*)\}" % re.escape(attr),
+                              css, re.S)
+            if not regle:
+                continue
+            if not re.search(r"%s:\s*0(?:px)?\s*;?" % re.escape(var.group(1)),
+                             regle.group(1)):
+                errors.append("style.css: la regle %s ne remet pas %s a zero: "
+                              "l'indicateur d'accueil garde 34 px sous le clavier"
+                              % (attr, var.group(1)))
+    return count
 
 
 def main():
@@ -303,6 +425,7 @@ def main():
     bar = check_symbol_bar(errors)
     viewport = check_viewport(errors)
     centering = check_centering(errors)
+    keyboard = check_keyboard_inset(errors)
 
     print("precache service worker : %d entrees" % precache)
     print("references dans HTML    : %d" % html_refs)
@@ -313,6 +436,7 @@ def main():
     print("touches barre vs stub   : %d" % bar)
     print("variables viewport CSS  : %d" % viewport)
     print("centrage de .screen     : %d" % centering)
+    print("marge clavier           : %d" % keyboard)
 
     if errors:
         print()

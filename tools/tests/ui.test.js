@@ -138,11 +138,17 @@ check('l\'enonce est compose de texte simple', currentPrompt().indexOf('<') === 
   check('le commentaire appartient a la famille "juste"',
     COMMENTS.correct.indexOf(document.getElementById('feedback').textContent) !== -1, true);
 
-  // Garde-fou: une seconde validation ne doit pas recompter le point.
-  type(answer);
-  submit();
-  check('le score ne bouge pas si on valide deux fois',
-    document.getElementById('score-text').textContent, 'Score : 1');
+  // Le second retour passe a la question suivante sans recompter: teste dans
+  // la section du clavier, la ou le double retour a tout son sens. Une seule
+  // soumission ici, pour que la suite du fichier reste sur la question 1.
+  //
+  // Le garde-fou reste entier: `state.answered` fait que validate() ne peut
+  // compter deux fois la meme reponse, meme si le code l'appelle deux fois.
+  check('une reponse ne peut etre recomptee',
+    document.getElementById('feedback').className, 'feedback feedback--correct');
+  check('Valider reste inactif apres reponse',
+    document.getElementById('validate-button').disabled, true);
+
 }
 
 // ---------------------------------------------------------------------------
@@ -621,6 +627,56 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
 }
 
 // ---------------------------------------------------------------------------
+// La touche retour du clavier
+// ---------------------------------------------------------------------------
+
+// `enterkeyhint="done"` fait que le clavier entree soumet le formulaire. La
+// touche doit donc valoir Valider PUIS Question suivante: c'est le geste le
+// plus repete de la serie, et lui faire viser un bouton entre les deux
+// multipliait les manipulations par deux.
+{
+  // Le fichier est arrive a la question 10/10, ou le retour suivant affiche le
+  // resultat: ce qu'on veut tester ici, c'est le passage a la question
+  // SUIVANTE, pas la fin de serie. On repart donc d'une serie neuve.
+  startTopic('elements');
+
+  const reponse = expectedAnswer(currentPrompt());
+  const promptAvant = currentPrompt();
+
+  // Premier retour: la reponse est comptee, le retour s'affiche.
+  type(reponse);
+  submit();
+  check('le retour compte la reponse',
+    document.getElementById('feedback').className, 'feedback feedback--correct');
+  check('le retour montre le commentaire',
+    document.getElementById('feedback').hidden, false);
+
+  // Second retour: on avance, sans recompter le point deja acquis.
+  const scoreAvant = document.getElementById('score-text').textContent;
+  submit();
+  check('le second retour passe a la question suivante',
+    currentPrompt() !== promptAvant, true);
+  check('le second retour ne recompte pas',
+    document.getElementById('score-text').textContent, scoreAvant);
+  check('le second retour a vide le champ', input.value, '');
+  check('le second retour masque le retour de la question precedente',
+    document.getElementById('feedback').hidden, true);
+  check('le second retour masque le bouton Suivant',
+    document.getElementById('next-button').hidden, true);
+  check('le curseur est deja dans le champ pour la question suivante',
+    document.activeElement === input, true);
+
+  // Un retour sur une reponse vide ne doit ni compter ni avancer: rien a
+  // valider, donc rien a faire.
+  const promptVide = currentPrompt();
+  const scoreVide = document.getElementById('score-text').textContent;
+  submit();
+  check('un retour a vide ne fait rien',
+    currentPrompt() === promptVide && document.getElementById('score-text').textContent === scoreVide,
+    true);
+}
+
+// ---------------------------------------------------------------------------
 // La parade anti-prise de focus
 // ---------------------------------------------------------------------------
 
@@ -664,8 +720,13 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   const root = document.documentElement;
   const cssVar = (name) => root.style.getPropertyValue(name);
 
-  // Au repos: la hauteur de l'ecran entier.
+  // Au repos: la hauteur de l'ecran entier, et la marge de l'indicateur
+  // d'accueil intacte. Les deux assertions se font ICI, avant l'ouverture du
+  // clavier: apres, l'absence d'attribut passerait toujours, puisque le
+  // clavier est justement ouvert. C'est l'ordre qui les rend significatives.
   check('au repos, la hauteur vaut celle de l\'ecran', cssVar('--app-height'), '844px');
+  check("au repos, l'indicateur d'accueil garde sa marge",
+    root.getAttribute('data-keyboard'), undefined);
 
   // Clavier ouvert sur un iPhone 15: il reste ~508 px, la ou le centrage se
   // faisait sur 844. Sans ca, la moitie basse du contenu etait sous le
@@ -681,10 +742,28 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   check('le decalage d\'iOS ne touche pas a la hauteur', cssVar('--app-height'), '508px');
   check('aucun decalage n\'est publie', root.style._props['--app-offset'], undefined);
 
+  // L'indicateur d'accueil du bas n'est utile que SANS clavier: le clavier le
+  // recouvre, et sa marge devient du vide. 34 px, et 34 px qui faisaient
+  // deborder l'ecran de quiz sur un petit telephone -- c'est ce qui permet a
+  // l'enonce, au champ et a Valider de tenir ensemble a l'ecran.
+  check("clavier ouvert, l'indicateur d'accueil est ecarte",
+    root.getAttribute('data-keyboard'), 'open');
+
+  // Un clavier qui ne fait pas tomber la fenetre de 80 px, c'est la barre
+  // d'adresse d'iOS qui se retracte: aucun clavier a l'ecran, donc la marge
+  // doit rester. C'est la seule chose qui distingue les deux, et le seuil
+  // est ce qui les departage.
+  viewport.setKeyboard(790);
+  check("une simple barre d'adresse n'est pas un clavier",
+    root.getAttribute('data-keyboard'), undefined);
+  viewport.setKeyboard(508);
+
   // Referme: on doit retrouver la hauteur de l'ecran, sinon la page reste
   // raccourcie apres le passage du clavier.
   viewport.hideKeyboard();
   check('clavier referme, la hauteur revient', cssVar('--app-height'), '844px');
+  check("clavier referme, l'indicateur d'accueil revient",
+    root.getAttribute('data-keyboard'), undefined);
   check('le curseur survit a la fermeture du clavier',
     document.activeElement === input, true);
 }
