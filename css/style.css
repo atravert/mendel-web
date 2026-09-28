@@ -275,6 +275,25 @@ body {
 
 .key--wide { flex: 2 1 0; }
 
+/* Touche armee: elle annonce ce que la prochaine frappe produira, il faut
+   donc qu'elle reste visible, pas seulement pendant l'appui du doigt. Le
+   Selecteur est limite a `key--script` parce que la touche du clavier porte
+   aussi un aria-pressed, de sens oppose: "faux" y signifie "clavier ouvert". */
+.key--script[aria-pressed='true'] {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+/* Le "123" de la touche doit se lire clairement comme un indice ou un
+   exposant, pas comme un petit nombre au hasard. */
+.key--script sub,
+.key--script sup {
+  font-size: 0.7em;
+  line-height: 1;
+  font-weight: 600;
+}
+
 #answer-form { display: flex; flex-direction: column; }
 
 /* --------------------------------------------------------------------------

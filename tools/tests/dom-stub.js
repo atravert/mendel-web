@@ -152,21 +152,30 @@ function createDocument(html, topicIds) {
   doc._declaredIds = (html.match(/id="([^"]+)"/g) || []).map((m) => m.slice(4, -1));
 
   // La barre de symboles doit repondre a querySelectorAll('[data-insert]')
-  // *avant* que le code de production ne s'execute: il enregistre ses
-  // ecouteurs au chargement, et ne les retrouverait jamais si le cablage
-  // etait fait plus tard.
+  // et querySelectorAll('[data-script]') *avant* que le code de production ne
+  // s'execute: il enregistre ses ecouteurs au chargement, et ne les
+  // retrouverait jamais si le cablage etait fait plus tard.
   const symbolBar = doc._elements['symbol-bar'];
   if (symbolBar) {
-    doc._symbolKeys = ['^', '-', '+', '(', ')'].map((value) => {
+    // Une touche se reconnait elle-meme a closest(), pour tester le
+    // preventDefault que le parent delegue.
+    const makeKey = (dataset) => {
       const key = makeElement('button', '', doc);
-      key.dataset.insert = value;
-      // Une touche se reconnait elle-meme a closest(), pour tester le
-      // preventDefault que le parent delegue.
+      Object.assign(key.dataset, dataset);
       key.closest = (selector) => (selector === '.key' ? key : null);
       return key;
-    });
-    symbolBar.querySelectorAll = (selector) =>
-      (selector === '[data-insert]' ? doc._symbolKeys : []);
+    };
+
+    // L'ordre suit index.html: c'est l'ordre des touches sur l'ecran, et les
+    // tests s'y referent par indice.
+    doc._insertKeys = ['+', '-', '(', ')'].map((value) => makeKey({ insert: value }));
+    doc._scriptKeys = ['sub', 'sup'].map((value) => makeKey({ script: value }));
+
+    symbolBar.querySelectorAll = (selector) => {
+      if (selector === '[data-insert]') return doc._insertKeys;
+      if (selector === '[data-script]') return doc._scriptKeys;
+      return [];
+    };
   }
 
   return doc;
@@ -177,7 +186,10 @@ function wireDom(doc) {
   return {
     input: doc._elements['answer-input'],
     symbolBar: doc._elements['symbol-bar'],
-    keys: doc._symbolKeys || [],
+    // Touches d'insertion, dans l'ordre de index.html: + - ( )
+    keys: doc._insertKeys || [],
+    // Touches d'indice et d'exposant: sub puis sup
+    scriptKeys: doc._scriptKeys || [],
   };
 }
 

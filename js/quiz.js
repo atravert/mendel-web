@@ -1,6 +1,6 @@
 // Logique du quiz: generation des series, correction des reponses, mise en
 // forme. Port des apps natives (QuizGenerator.kt et QuizModel.swift), avec
-// trois corrections assumees, signalees ci-dessous.
+// des corrections assumees, signalees ci-dessous.
 
 import { ELEMENTS, IONS, COMMENTS, QUESTIONS_PER_SERIES } from './data.js';
 
@@ -21,14 +21,18 @@ const QUESTION_TYPE = {
   },
 };
 
-/** Texte d'aide du champ de saisie. */
+/**
+ * Texte d'aide du champ de saisie. La formule est annoncee avec ses vrais
+ * indices et exposants Unicode, c'est-a-dire sous la forme que produisent
+ * les touches dediees de la barre de symboles.
+ */
 const INPUT_HINT = {
   elements: {
     nameToCode: 'Tape le symbole (ex. : Fe)',
     codeToName: "Tape le nom de l'élément",
   },
   ions: {
-    nameToCode: 'Tape la formule (ex. : ClO3^-)',
+    nameToCode: 'Tape la formule (ex. : ClO₃⁻)',
     codeToName: "Tape le nom de l'ion",
   },
 };
@@ -82,23 +86,37 @@ export function generateSeries(topicId, count = QUESTIONS_PER_SERIES) {
 // Correction
 // ---------------------------------------------------------------------------
 
-// CORRECTION 1 -- le symbole d'un element etait compare en egalite stricte
-// dans MainActivity.kt ("fe" et "FE" etaient comptes faux), et l'app iOS
-// aggravait le probleme en forçant la majuscule complete via
-// .textInputAutocapitalization(.characters), ce qui transformait "fe" en
-// "FE", impossible a matcher. On compare donc sans tenir compte de la casse.
+// La casse compte desormais.
+//
+// Une formule chimique n'a qu'une seule graphie legitime: la majuscule de
+// chaque symbole d'element. Accepter "clo3-" ou "CLO3-" apprend une faute --
+// c'est tout l'interet d'un quiz de chimie. Les deux apps natives etaient
+// laxistes sur ce point, et l'app iOS aggravait le probleme en forçant la
+// majuscule complete via .textInputAutocapitalization(.characters).
+//
+// Consequence assumee: la saisie devient exigeante. Le clavier est donc
+// configure en autocapitalize="sentences" (voir index.html), qui ouvre en
+// majuscule puis bascule seul apres le premier caractere. "Fe" et "ClO"
+// s'ecrivent donc naturellement; les majuscules suivantes restent a la main.
+//
+// CORRECTION 1 (annulee) -- le symbole d'un element etait compare sans
+// tenir compte de la casse, pour que "fe" et "FE" comptent juste.
 export function normalizeSymbol(input) {
-  return input.trim().toLowerCase();
+  return input.trim();
 }
 
 // CORRECTION 2 -- normalizeFormula des natives ne retirait que l'espace et
 // "^". Or les claviers de telephone produisent volontiers les vrais indices
-// et exposants Unicode: taper "ClO3^-" au doigt donne souvent "ClO3" avec
-// des caracteres ₃ et ⁻, qui etaient refuses. On convertit d'abord vers de
-// l'ASCII, puis on normalise.
+// et exposants Unicode: taper "ClO3^-" au doigt donne souvent "ClO₃⁻", qui
+// etait refuse. On convertit d'abord vers de l'ASCII, puis on normalise.
+//
+// La touche "^" a disparu de la barre de symboles, remplacee par les touches
+// d'indice et d'exposant (voir les tables ci-dessous): le "^" n'est plus
+// qu'un equivalent clavier, accepte mais plus propose.
 const SUBSCRIPT_TO_ASCII = {
   '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
   '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+  '₋': '-', '₊': '+',
 };
 
 const SUPERSCRIPT_TO_ASCII = {
@@ -108,8 +126,8 @@ const SUPERSCRIPT_TO_ASCII = {
 };
 
 /**
- * Ramene une formule a une forme unique: "ClO3^-", "clo3-", "ClO₃⁻" et
- * "ClO3 ^ 2 -" donnent tous la meme cle.
+ * Ramene une formule a une forme unique: "ClO3^-", "ClO3-" et "ClO₃⁻"
+ * donnent tous la meme cle. La casse, elle, est preservee.
  */
 export function normalizeFormula(input) {
   let text = '';
@@ -120,7 +138,7 @@ export function normalizeFormula(input) {
     else if (sup) text += sup;
     else if (char !== '^' && !/\s/.test(char)) text += char;
   }
-  return text.toLowerCase();
+  return text;
 }
 
 /** Nom d'element ou d'ion: insensible a la casse, aux accents et aux espaces. */
@@ -143,7 +161,61 @@ export function isCorrect(input, question) {
       ? normalizeSymbol(answer) === normalizeSymbol(question.answer)
       : normalizeFormula(answer) === normalizeFormula(question.answer);
   }
+  // Les noms restent tolerants: on demande le nom de l'ion, pas sa graphie
+  // exacte, et taper "nitrate" au doigt ne doit pas etre puni.
   return normalizeName(answer) === normalizeName(question.answer);
+}
+
+// ---------------------------------------------------------------------------
+// Saisie en indice ou en exposant
+// ---------------------------------------------------------------------------
+
+/**
+ * Ce qu'inserent les touches d'indice et d'exposant de la barre de symboles,
+ * pour chaque touche du clavier. La lettre est la cle: le code du caractere
+ * Unicode insere.
+ *
+ * Ce sont de vrais caracteres Unicode et non de l'ASCII, parce que la touche
+ * "^" a disparu de la barre. Sans elle, il faut bien un signe qui distingue
+ * la charge du corps de la formule: un "⁻" en exposant ne peut designer que
+ * la charge, alors que "SO42-" se lirait "SO(quarante-deux)". C'est aussi la
+ * forme qu'affichait deja l'application, via <sub> et <sup>.
+ *
+ * Ces caracteres sont enfin ceux que produisent les claviers de telephone,
+ * donc une formule frappee au clavier et une formule composee a la barre se
+ * rejoignent, sans double saisie a l'ecran.
+ */
+export const SCRIPT_TABLES = {
+  sub: {
+    '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+    '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+    '+': '₊', '-': '₋',
+  },
+  sup: {
+    '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+    '+': '⁺', '-': '⁻',
+  },
+};
+
+/**
+ * Que fait la touche frappee pendant qu'un mode indice ou exposant est arme?
+ *
+ * Renvoie null si aucun mode n'est arme. Sinon `{ char, mode }`: `char` est
+ * le caractere a inserer, ou null si la touche n'en produit pas; `mode` est
+ * le mode a conserver.
+ *
+ * La regle de sortie est celle de la demande: un chiffre, "+" ou "-" restent
+ * dans le mode, tout le reste en sort. C'est ce qui permet de taper une
+ * charge d'affilee -- exposant, "2", "-", soit trois touches, dont les deux
+ * dernieres doivent rester dans le mode. Un caractere de formule en sort,
+ * ce qui permet de reprendre la base: "SO", indice, "4", "O" (sortie), puis
+ * exposant, "2", "-".
+ */
+export function scriptInput(mode, key) {
+  if (!mode || !SCRIPT_TABLES[mode]) return null;
+  const char = SCRIPT_TABLES[mode][key];
+  return { char: char || null, mode: char ? mode : null };
 }
 
 // ---------------------------------------------------------------------------

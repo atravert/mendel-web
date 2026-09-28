@@ -245,14 +245,21 @@ startTopic('ions');
 check('sur une formule, la barre est visible',
   document.getElementById('symbol-bar').hidden, false);
 
+// L'ordre des touches est celui de index.html: + - ( )
+check('la premiere touche insere un +', dom.keys[0].dataset.insert, '+');
+check('la deuxieme touche insere un -', dom.keys[1].dataset.insert, '-');
+check('la troisieme touche insere une (', dom.keys[2].dataset.insert, '(');
+check('la quatrieme touche insere une )', dom.keys[3].dataset.insert, ')');
+ok('plus de touche carets', dom.keys.filter((k) => k.dataset.insert === '^').length === 0);
+
 input.value = 'SO4';
 input.setSelectionRange(4, 4);
-dom.keys[0].fire('click');           // touche "^"
-check('le caractere est insere au curseur', input.value, 'SO4^');
+dom.keys[0].fire('click');           // touche "+"
+check('le caractere est insere au curseur', input.value, 'SO4+');
 check('le curseur avance', input.selectionStart, 5);
 
 dom.keys[1].fire('click');           // touche "-"
-check('second caractere insere', input.value, 'SO4^-');
+check('second caractere insere', input.value, 'SO4+-');
 
 input.value = 'ClO3';
 input.setSelectionRange(0, 0);
@@ -260,8 +267,8 @@ dom.keys[1].fire('click');
 check('insertion en debut de champ', input.value, '-ClO3');
 
 input.setSelectionRange(1, 3);
-dom.keys[2].fire('click');           // touche "+"
-check('insertion dans une selection', input.value, '-+O3');
+dom.keys[2].fire('click');           // touche "("
+check('insertion dans une selection', input.value, '-(O3');
 
 // Regression: inserer un symbole ecrit dans .value sans emettre d'evenement
 // `input`. Si le bouton Valider n'etait pas reactive explicitement, il restait
@@ -284,6 +291,161 @@ check('insertion dans une selection', input.value, '-+O3');
     target: { closest: () => null },
   });
   check('le clic hors des touches n\'est pas bloque', horsTouche.defaultPrevented, undefined);
+}
+
+// ---------------------------------------------------------------------------
+// Touches d'indice et d'exposant
+// ---------------------------------------------------------------------------
+
+{
+  const [indice, exposant] = dom.scriptKeys;
+
+  // Le stub n'a pas de saisie clavier: pour une touche que le code laisse
+  // passer, on imite le navigateur, sans quoi le champ resterait fige et la
+  // seule difference observable serait l'etat du mode. C'est aussi ce qui
+  // rend l'assertion sur preventDefault signifiante: sans lui, le caractere
+  // ASCII viendrait s'ajouter a l'Unicode insere par le code.
+  const press = (key) => {
+    const event = input.fire('keydown', { key });
+    if (!event.defaultPrevented) {
+      const at = input.selectionStart;
+      input.value = input.value.slice(0, at) + key + input.value.slice(at);
+      input.setSelectionRange(at + 1, at + 1);
+    }
+    return event;
+  };
+
+  check('deux touches de script', dom.scriptKeys.length, 2);
+  check('la premiere est l\'indice', indice.dataset.script, 'sub');
+  check('la seconde est l\'exposant', exposant.dataset.script, 'sup');
+  check('aucun mode n\'est arme au depart', indice.getAttribute('aria-pressed'), 'false');
+
+  input.value = '';
+  indice.fire('click');
+  check('l\'indice s\'arme', indice.getAttribute('aria-pressed'), 'true');
+  check('l\'exposant reste eteint', exposant.getAttribute('aria-pressed'), 'false');
+  check('armer un mode n\'insere rien', input.value, '');
+
+  // Le corps: S, O puis l'indice 4.
+  input.value = 'SO';
+  input.setSelectionRange(2, 2);
+  press('4');
+  check('le chiffre devient un indice', input.value, 'SO₄');
+  check('le mode indice tient apres un chiffre', indice.getAttribute('aria-pressed'), 'true');
+
+  // La charge: on passe en exposant, puis "2" et "-" d'affilee.
+  exposant.fire('click');
+  check('armer l\'exposant eteint l\'indice', indice.getAttribute('aria-pressed'), 'false');
+  press('2');
+  press('-');
+  check('la formule se compose aux touches', input.value, 'SO₄²⁻');
+  check('le mode exposant tient apres le signe', exposant.getAttribute('aria-pressed'), 'true');
+
+  // Le caret a disparu de la barre: si preventDefault() manquait, le
+  // navigateur insererait le "-" ASCII en plus du "⁻" insere ici.
+  press('-');
+  check('une touche interceptee ne double pas l\'insertion', input.value, 'SO₄²⁻⁻');
+
+  // Sortie du mode par un caractere qui n'est ni un chiffre, ni +, ni -.
+  press('O');
+  check('une lettre sort du mode', exposant.getAttribute('aria-pressed'), 'false');
+  press('-');
+  check('apres la sortie le signe est redevenu un - ordinaire', input.value.slice(-2), 'O-');
+
+  exposant.fire('click');
+  press(' ');
+  check('l\'espace sort du mode', exposant.getAttribute('aria-pressed'), 'false');
+
+  // Reappuyer sur la touche armee la desarme: c'est le seul moyen de sortir
+  // sans avoir a taper un caractere de sortie.
+  input.value = 'NH';
+  input.setSelectionRange(2, 2);
+  indice.fire('click');
+  press('4');
+  check('l\'ammonium prend son indice', input.value, 'NH₄');
+  indice.fire('click');
+  check('reappuyer desarme', indice.getAttribute('aria-pressed'), 'false');
+  press('4');
+  check('apres desaturation le chiffre redevient un 4', input.value, 'NH₄4');
+
+  // Le mode ne doit pas survivre a la question suivante.
+  indice.fire('click');
+  check('indice arme avant de changer de question', indice.getAttribute('aria-pressed'), 'true');
+  type('zzz');
+  submit();
+  document.getElementById('next-button').fire('click');
+  check('le mode se reinitialise a la question suivante',
+    indice.getAttribute('aria-pressed'), 'false');
+  check('l\'exposant aussi', exposant.getAttribute('aria-pressed'), 'false');
+}
+
+// ---------------------------------------------------------------------------
+// Bout en bout: composer une formule a la barre, puis la faire valider
+// ---------------------------------------------------------------------------
+
+/** Saisit au clavier une formule au format de data.js, en passant par la barre. */
+function composeFormula(formula) {
+  const [body, charge] = formula.split('^');
+  input.value = '';
+  input.setSelectionRange(0, 0);
+
+  for (const char of body) {
+    if (/[0-9]/.test(char)) {
+      dom.scriptKeys[0].fire('click');           // arme l'indice
+      input.fire('keydown', { key: char });
+    } else {
+      input.value += char;
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+  }
+  if (charge) {
+    dom.scriptKeys[1].fire('click');             // arme l'exposant
+    for (const char of charge) input.fire('keydown', { key: char });
+  }
+  input.fire('input', { target: input });
+}
+
+/** Ce que la saisie au doigt doit produire: corps en indices, charge en exposants. */
+function unicodeFormula(formula) {
+  const [body, charge] = formula.split('^');
+  return body.replace(/[0-9]/g, (d) => SCRIPT_TABLES.sub[d])
+    + (charge || '').replace(/[0-9+-]/g, (c) => SCRIPT_TABLES.sup[c]);
+}
+
+{
+  screen('start');
+  startTopic('ions');
+
+  // Rejoindre une question dont on doit composer la formule.
+  let target = null;
+  for (let step = 0; step < 10 && !target; step += 1) {
+    const match = IONS.filter((i) => i.name === currentPrompt())[0];
+    if (match) target = match;
+    else {
+      type(expectedAnswer(currentPrompt()) || 'zzz');
+      submit();
+      document.getElementById('next-button').fire('click');
+    }
+  }
+  ok('une question "nom vers formule" est atteinte', target !== null);
+
+  const scoreBefore = document.getElementById('score-text').textContent;
+  composeFormula(target.formula);
+
+  // La valeur du champ doit etre la forme Unicode, pas la forme "caret" de
+  // data.js: c'est ce que voit le joueur, et ce que produit la touche.
+  check('le champ contient la forme Unicode', input.value, unicodeFormula(target.formula));
+
+  submit();
+  check('la formule composee a la barre est acceptee',
+    document.getElementById('feedback').className, 'feedback feedback--correct');
+  check('le score augmente', document.getElementById('score-text').textContent !== scoreBefore, true);
+
+  // On enchaîne: valider donne le focus au bouton Suivant, et la section
+  // clavier suivante suppose le champ actif.
+  document.getElementById('next-button').fire('click');
+  check('le champ reprend le focus a la question suivante',
+    document.activeElement === input, true);
 }
 
 // ---------------------------------------------------------------------------

@@ -84,7 +84,7 @@ check('une serie de 3 donne 1 nom->code et 2 code->nom', generateSeries('element
   .filter((q) => q.direction === DIRECTION.NAME_TO_CODE).length, 1);
 
 // ---------------------------------------------------------------------------
-// CORRECTION 1: symbole d'element insensible a la casse
+// CASSE STRICTE: le symbole se tape tel qu'il s'ecrit
 // ---------------------------------------------------------------------------
 
 const symbolQuestion = {
@@ -94,20 +94,24 @@ const symbolQuestion = {
   answer: 'Fe',
 };
 check('symbole exact', isCorrect('Fe', symbolQuestion), true);
-check('symbole minuscule', isCorrect('fe', symbolQuestion), true);
-check('symbole majuscule', isCorrect('FE', symbolQuestion), true);
 check('symbole entoure d espaces', isCorrect('  Fe  ', symbolQuestion), true);
+check('symbole en minuscules refuse', isCorrect('fe', symbolQuestion), false);
+check('symbole tout majuscules refuse', isCorrect('FE', symbolQuestion), false);
+check('symbole a l\'inverse des cas refuse', isCorrect('fE', symbolQuestion), false);
 check('mauvais symbole', isCorrect('Fr', symbolQuestion), false);
 check('le nom entier ne vaut pas', isCorrect('Fer', symbolQuestion), false);
 check('reponse vide', isCorrect('', symbolQuestion), false);
 check('reponse blanche', isCorrect('   ', symbolQuestion), false);
 
-check('symbole mono-caractere', isCorrect('u', {
+check('symbole mono-caractere', isCorrect('U', {
   topic: 'elements', direction: DIRECTION.NAME_TO_CODE, prompt: 'Uranium', answer: 'U',
 }), true);
+check('symbole mono-caractere en minuscule refuse', isCorrect('u', {
+  topic: 'elements', direction: DIRECTION.NAME_TO_CODE, prompt: 'Uranium', answer: 'U',
+}), false);
 
 // ---------------------------------------------------------------------------
-// CORRECTION 2: formules d'ions tolerantes
+// Formules d'ions: forme toleratee, casse non
 // ---------------------------------------------------------------------------
 
 const ionQuestion = {
@@ -118,16 +122,19 @@ const ionQuestion = {
 };
 check('formule canonique', isCorrect('ClO3^-', ionQuestion), true);
 check('formule sans carets', isCorrect('ClO3-', ionQuestion), true);
-check('formule minuscule', isCorrect('clo3-', ionQuestion), true);
 check('formule avec espaces', isCorrect('  Cl O 3 ^ - ', ionQuestion), true);
 check('vrais indices et exposants', isCorrect('ClO₃⁻', ionQuestion), true);
 check('mauvaise charge', isCorrect('ClO3^2-', ionQuestion), false);
 check('mauvais oxygene', isCorrect('ClO2^-', ionQuestion), false);
 check('nom a la place de la formule', isCorrect('Chlorate', ionQuestion), false);
+check('formule en minuscules refusee', isCorrect('clo3-', ionQuestion), false);
+check('formule tout en majuscules refusee', isCorrect('CLO3-', ionQuestion), false);
+check('oxygene en minuscule refuse', isCorrect('Clo3-', ionQuestion), false);
 
 const divalent = { topic: 'ions', direction: DIRECTION.NAME_TO_CODE, prompt: 'Sulfate', answer: 'SO4^2-' };
 check('charge 2- canonique', isCorrect('SO4^2-', divalent), true);
 check('charge 2- en Unicode', isCorrect('SO₄²⁻', divalent), true);
+check('charge 2- en Unicode et ASCII melanges', isCorrect('SO₄2-', divalent), true);
 
 const cation = { topic: 'ions', direction: DIRECTION.NAME_TO_CODE, prompt: 'Ammonium', answer: 'NH4^+' };
 check('charge + en Unicode', isCorrect('NH₄⁺', cation), true);
@@ -136,6 +143,82 @@ check('charge + separee', isCorrect('NH4^+', cation), true);
 check('thiosulfate a deux indices', isCorrect('S2O3^2-', {
   topic: 'ions', direction: DIRECTION.NAME_TO_CODE, prompt: 'Thiosulfate', answer: 'S2O3^2-',
 }), true);
+check('thiosulfate en Unicode', isCorrect('S₂O₃²⁻', {
+  topic: 'ions', direction: DIRECTION.NAME_TO_CODE, prompt: 'Thiosulfate', answer: 'S2O3^2-',
+}), true);
+
+// ---------------------------------------------------------------------------
+// Les 20 formules doivent etre acceptables sous la forme que produisent les
+// touches indice et exposant. C'est le test qui prouve que la barre sert a
+// quelque chose: si la normalisation ne reconnait pas un caractere insere,
+// le joueur ne peut plus reussir une seule question de formule au doigt.
+// ---------------------------------------------------------------------------
+
+/** Reproduit la saisie au doigt: corps en indices, charge en exposants. */
+function typedFormula(formula) {
+  const [body, charge] = formula.split('^');
+  return body.replace(/[0-9]/g, (d) => SCRIPT_TABLES.sub[d])
+    + (charge || '').replace(/[0-9+-]/g, (c) => SCRIPT_TABLES.sup[c]);
+}
+
+{
+  const refusees = IONS.filter((ion) => !isCorrect(typedFormula(ion.formula), {
+    topic: 'ions', direction: DIRECTION.NAME_TO_CODE, prompt: ion.name, answer: ion.formula,
+  })).map((ion) => ion.formula);
+  check('les 20 formules passent la saisie a la barre', refusees, []);
+}
+
+// ---------------------------------------------------------------------------
+// Mode indice / exposant
+// ---------------------------------------------------------------------------
+
+check('aucun mode arme: la frappe n\'est pas traduite', scriptInput(null, '3'), null);
+check('mode inconnu ignore', scriptInput('bidon', '3'), null);
+
+check('indice: un chiffre', scriptInput('sub', '4'), { char: '₄', mode: 'sub' });
+check('indice: le zero', scriptInput('sub', '0'), { char: '₀', mode: 'sub' });
+check('indice: le moins reste dans le mode', scriptInput('sub', '-'), { char: '₋', mode: 'sub' });
+check('indice: le plus reste dans le mode', scriptInput('sub', '+'), { char: '₊', mode: 'sub' });
+check('indice: une lettre sort du mode', scriptInput('sub', 'O'), { char: null, mode: null });
+check('indice: l\'espace sort du mode', scriptInput('sub', ' '), { char: null, mode: null });
+check('indice: backspace sort du mode', scriptInput('sub', 'Backspace'), { char: null, mode: null });
+check('indice: entree sort du mode', scriptInput('sub', 'Enter'), { char: null, mode: null });
+
+check('exposant: un chiffre', scriptInput('sup', '2'), { char: '²', mode: 'sup' });
+check('exposant: le moins', scriptInput('sup', '-'), { char: '⁻', mode: 'sup' });
+check('exposant: le plus', scriptInput('sup', '+'), { char: '⁺', mode: 'sup' });
+check('exposant: une lettre sort du mode', scriptInput('sup', 'O'), { char: null, mode: null });
+
+// C'est la raison d'etre de la regle de sortie: les deux caracteres d'une
+// charge se tapent d'affilee, et le mode doit tenir entre les deux.
+check('la charge se tape d\'un trait', scriptInput(scriptInput('sup', '2').mode, '-'),
+  { char: '⁻', mode: 'sup' });
+check('indice a deux chiffres', scriptInput(scriptInput('sub', '1').mode, '2'),
+  { char: '₂', mode: 'sub' });
+
+// L'invariant qui relie les deux tables: tout ce que la barre insere doit
+// etre relu par la normalisation. Une table et la table de conversion qui
+// divergent, et le joueur perd le point sur une formule correctement tapee.
+{
+  let perdus = 0;
+  for (const table of [SCRIPT_TABLES.sub, SCRIPT_TABLES.sup]) {
+    for (const ascii of Object.keys(table)) {
+      if (normalizeFormula(table[ascii]) !== ascii) perdus += 1;
+    }
+  }
+  check('tout caractere insere se relit', perdus, 0);
+}
+
+{
+  const tous = [].concat(Object.keys(SCRIPT_TABLES.sub), Object.keys(SCRIPT_TABLES.sup));
+  const inseres = [].concat(Object.values(SCRIPT_TABLES.sub), Object.values(SCRIPT_TABLES.sup));
+  check('douze touches par table', [Object.keys(SCRIPT_TABLES.sub).length,
+    Object.keys(SCRIPT_TABLES.sup).length], [12, 12]);
+  check('24 caracteres inseres, tous distincts', new Set(inseres).size, 24);
+  check('aucun caractere insere n\'est un chiffre ASCII', inseres.filter((c) => /[0-9]/.test(c)).length, 0);
+  check('aucun caractere insere n\'est un signe ASCII', inseres.filter((c) => /[+-]/.test(c)).length, 0);
+  check('que des touches de chiffres et de signes', tous.filter((t) => !/^[0-9+-]$/.test(t)), []);
+}
 
 // ---------------------------------------------------------------------------
 // Noms: casse, accents, espaces
@@ -159,8 +242,10 @@ check('suffixe refuse', isCorrect('nitrate !', nameQuestion), false);
 check('normalizeName retire les accents', normalizeName('Électron'), 'electron');
 check('normalizeName compacte les espaces', normalizeName('  sel   de  cuisine '), 'sel de cuisine');
 check('normalizeName garde l\'accent de reference', normalizeName('Manganèse'), 'manganese');
-check('normalizeSymbol', normalizeSymbol('  FE '), 'fe');
-check('normalizeFormula', normalizeFormula('  ClO₃ ⁻ '), 'clo3-');
+check('normalizeSymbol', normalizeSymbol('  Fe '), 'Fe');
+check('normalizeFormula', normalizeFormula('  ClO₃ ⁻ '), 'ClO3-');
+check('normalizeSymbol ne replie plus la casse', normalizeSymbol('fE'), 'fE');
+check('normalizeFormula ne replie plus la casse', normalizeFormula('CLO3-'), 'CLO3-');
 
 // ---------------------------------------------------------------------------
 // Mise en forme
@@ -218,7 +303,10 @@ check('formule d\'enonce ion rendue en morceaux', formulaParts(displayedPrompt(n
 check('libelle symbole', questionTypeText(symbolQuestion), 'Quel est le symbole chimique du :');
 check('libelle nom', questionTypeText(nameQuestion), 'Quel ion correspond à la formule :');
 check('aide symbole', inputHint(symbolQuestion), 'Tape le symbole (ex. : Fe)');
-ok('aide formule', inputHint(ionQuestion).indexOf('ClO3^-') !== -1);
+// L'aide doit annoncer la forme que produisent les touches de la barre, donc
+// avec de vrais indices et exposants Unicode.
+ok('aide formule en Unicode', inputHint(ionQuestion).indexOf('ClO₃⁻') !== -1);
+check('l\'aide formule ne montre plus le carets', inputHint(ionQuestion).indexOf('^'), -1);
 
 // ---------------------------------------------------------------------------
 // Phrases de retour

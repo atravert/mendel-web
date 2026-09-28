@@ -16,6 +16,7 @@ import {
   inputHint,
   formatAnswer,
   formulaParts,
+  scriptInput,
   correctComment,
   wrongComment,
   finalComment,
@@ -38,6 +39,10 @@ const state = {
   // refocuse l'input que s'il le souhaite encore, sinon il se rouvre tout
   // seul a chaque question et c'est penible.
   wantsKeyboard: true,
+  // 'sub', 'sup', ou null: mode arme par la touche d'indice ou d'exposant.
+  // Reinitialise a chaque question, sinon un modearme par erreur
+  // contaminerait la question suivante.
+  script: null,
 };
 
 const el = {
@@ -67,6 +72,10 @@ const el = {
   installButton: document.getElementById('install-button'),
   installHint: document.getElementById('install-hint'),
 };
+
+// Les touches d'indice et d'exposant sont listees a part des touches
+// d'insertion: elles n'inserent rien, elles arment un mode.
+const scriptKeys = Array.from(el.symbolBar.querySelectorAll('[data-script]'));
 
 // ---------------------------------------------------------------------------
 // Navigation
@@ -134,6 +143,7 @@ function renderQuestion() {
   el.nextButton.hidden = true;
 
   el.symbolBar.hidden = !expectsFormula(question);
+  setScript(null);
 
   if (state.wantsKeyboard) el.input.focus();
 }
@@ -252,6 +262,49 @@ function insertAtCursor(text) {
   refreshValidateButton();
 }
 
+/**
+ * Arme ou desarme un mode de saisie, et reflete l'etat dans les touches.
+ *
+ * Le mode n'insere rien: il change ce que la prochaine frappe produit. Une
+ * touche armee reste allumee, sinon le joueur ne sait plus s'il tape en
+ * indice ou en base apres avoir leve le doigt.
+ */
+function setScript(mode) {
+  state.script = mode;
+  for (const key of scriptKeys) {
+    key.setAttribute('aria-pressed', String(key.dataset.script === mode));
+  }
+}
+
+/**
+ * Une touche d'indice ou d'exposant: arme le mode correspondant, ou le
+ * desarme si elle etait deja activee. Reappuyer est donc le moyen de sortir
+ * sans avoir a taper un caractere de sortie.
+ */
+function toggleScript(mode) {
+  setScript(state.script === mode ? null : mode);
+}
+
+/**
+ * La frappe du clavier est traduite quand un mode est arme: scriptInput()
+ * dit quoi inserer, et si le mode survit. Un chiffre, "+" ou "-" restent
+ * dans le mode, tout autre caractere en sort.
+ *
+ * Le caractere est insere a la main, donc `preventDefault()` est
+ * indispensable: sans lui le navigateur insererait aussi le "3" ASCII et on
+ * obtiendrait "SO₄3".
+ */
+function onKeydown(event) {
+  const step = scriptInput(state.script, event.key);
+  if (!step) return;
+
+  if (step.char !== null) {
+    event.preventDefault();
+    insertAtCursor(step.char);
+  }
+  setScript(step.mode);
+}
+
 function toggleKeyboard() {
   state.wantsKeyboard = !state.wantsKeyboard;
   el.toggleKeyboard.setAttribute('aria-pressed', String(!state.wantsKeyboard));
@@ -348,9 +401,14 @@ for (const key of el.symbolBar.querySelectorAll('[data-insert]')) {
   key.addEventListener('click', () => insertAtCursor(key.dataset.insert));
 }
 
+for (const key of scriptKeys) {
+  key.addEventListener('click', () => toggleScript(key.dataset.script));
+}
+
 el.toggleKeyboard.addEventListener('click', toggleKeyboard);
 
 el.input.addEventListener('input', refreshValidateButton);
+el.input.addEventListener('keydown', onKeydown);
 
 // Le navigateur n'autorise une lecture audio qu'a partir d'un geste
 // utilisateur. On ouvre le contexte des le premier appui, puis on retente

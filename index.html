@@ -71,27 +71,42 @@
 
     <form id="answer-form" novalidate>
       <label class="visually-hidden" for="answer-input">Ta réponse</label>
+      <!-- autocapitalize="sentences" et non "off" : le clavier s'ouvre en
+           majuscule puis bascule seul apres le premier caractere, ce qui
+           donne "Fe" et "ClO" sans manip shift pour la premiere lettre.
+           L'utilisateur remonte les majuscules suivantes lui-meme avec la
+           toucheMaj. "characters" est a proscrire: il force tout en
+           majuscules et produirait "FE", que la correction refuse. -->
       <input
         id="answer-input"
         class="answer-input"
         type="text"
         autocomplete="off"
         autocorrect="off"
-        autocapitalize="off"
+        autocapitalize="sentences"
         spellcheck="false"
         enterkeyhint="done"
         maxlength="24"
         placeholder="">
 
       <!-- Barre de symboles: uniquement quand la reponse attendue est une
-           formule d'ion, ou ^ et - sont introuvables sur un clavier de
-           telephone. Injectee au curseur, pas concatenee a la fin. -->
+           formule d'ion, ou les indices, exposants et parentheses sont
+           introuvables sur un clavier de telephone. Injectee au curseur, pas
+           concatenee a la fin.
+
+           Les deux premieres touches arment un mode plutot que d inserer un
+           caractere: elles annoncent ce que la PROCHAINE frappe produira.
+           `aria-pressed` porte l'etat du mode, lisible par un lecteur
+           d'ecran; la classe `key--active` le montre a l'ecran. -->
       <div class="symbol-bar" id="symbol-bar" hidden aria-label="Caractères de la formule">
-        <button class="key" type="button" data-insert="^" aria-label="caret">^</button>
+        <button class="key key--script" type="button" data-script="sub"
+                aria-label="indice" aria-pressed="false"><sub>123</sub></button>
+        <button class="key key--script" type="button" data-script="sup"
+                aria-label="exposant" aria-pressed="false"><sup>123</sup></button>
+        <button class="key" type="button" data-insert="+" aria-label="plus">+</button>
         <button class="key" type="button" data-insert="-" aria-label="moins">-</button>
-        <button class="key" type="button" data-insert="+">+</button>
-        <button class="key" type="button" data-insert="(">(</button>
-        <button class="key" type="button" data-insert=")">)</button>
+        <button class="key" type="button" data-insert="(" aria-label="parenthese ouvrante">(</button>
+        <button class="key" type="button" data-insert=")" aria-label="parenthese fermante">)</button>
         <button class="key key--wide" type="button" id="toggle-keyboard" aria-pressed="false">
           ⌨︎
         </button>

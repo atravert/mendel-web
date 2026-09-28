@@ -31,7 +31,7 @@ Trois contrôles, tous exécutables sans rien installer :
 | Commande | Ce qu'elle fait |
 |---|---|
 | `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. |
-| `make test` | 176 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
+| `make test` | 240 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
 | `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
 
@@ -135,28 +135,61 @@ le couvrir à fond.
 Le comportement est celui des deux apps, à trois exceptions — toutes
 corrigées ici parce qu'elles faisaient vraiment perdre des points.
 
-**1. Le symbole d'un élément est comparé sans tenir compte de la casse.**
-Android comparait en égalité stricte (`MainActivity.kt:211`) : « fe » et
-« FE » étaient comptés faux. iOS aggravait le problème en forçant la
-majuscule complète (`.textInputAutocapitalization(.characters)`,
+**1. La casse compte : `Fe` et `ClO₃⁻` se tapent tels quels.**
+
+C'est le changement le plus visible, et il va à l'opposé de ce que les natives
+faisaient. Android comparait en égalité stricte (`MainActivity.kt:211`) et
+iOS forçait la majuscule complète (`.textInputAutocapitalization(.characters)`,
 `QuizView.swift:34`), ce qui transformait « fe » en « FE », impossible à
-trouver. Ici la casse est ignorée.
+trouver. Une version intermédiaire rendait la casse insensible, par prudence.
+
+Ce n'était pas la bonne solution : une formule chimique n'a qu'une seule
+graphie, et accepter « clo3- » apprend une faute. Ici la casse est vérifiée
+pour les symboles d'éléments et les formules d'ions. Les **noms** restent
+tolérants — on demande le nom de l'ion, pas sa graphie, et taper « nitrate »
+au doigt ne doit pas être puni.
+
+La saisie devient donc exigeante, et le clavier suit :
+`autocapitalize="sentences"` l'ouvre en majuscule puis le laisse retomber seul
+après le premier caractère. « Fe » et « ClO » s'écrivent donc naturellement ;
+les majuscules suivantes restent à la main, avec la touche Maj.
 
 **2. Les formules d'ions tolèrent les vrais indices et exposants.**
 `normalizeFormula` (`MainActivity.kt:302`) ne retirait que l'espace et `^`.
 Mais les claviers de téléphone produisent volontiers `ClO₃⁻` avec de vrais
 caractères Unicode, qui était refusé. Ici les indices et exposants Unicode
-sont convertis en ASCII avant comparaison, et la casse est ignorée.
+sont convertis en ASCII avant comparaison.
 
 **3. Numéro atomique du krypton.** La source iOS déclare `Kr` en position 35
 alors qu'il vaut 36 (le 35 est le brome, déjà déclaré). Sans effet sur le
 quiz, qui n'affiche jamais le numéro, mais faux dès que la donnée fait
 autorité. Corrigé dans `tools/extract-data.py`.
 
-Deux ajustements d'ergonomie, dans le même sens :
+Trois ajustements d'ergonomie, dans le même sens :
 
-- **Barre de symboles** quand la réponse attendue est une formule : `^`, `-`,
-  `+`, `(` et `)` sont absents de la plupart des claviers de téléphone.
+- **Barre de symboles** quand la réponse attendue est une formule. Deux
+  touches à *mode armé* — indice et exposant, dessinées en `123` en petit
+  caractères — remplacent `^`, qui n'est pas atteignable au doigt :
+
+  | Touche | Effet |
+  |---|---|
+  | `₁₂₃` indice | la frappe suivante produit un indice : `4` devient `₄` |
+  | `¹²³` exposant | la frappe suivante produit un exposant : `2` devient `²` |
+  | `+` `-` `(` `)` | insérés tels quels, au curseur |
+
+  Le mode tient sur un chiffre, un `+` ou un `-` — c'est ce qui permet de
+  taper une charge d'affilée (exposant, `2`, `-`) — et se quitte sur tout
+  autre caractère, l'espace comprise. Recliquer la touche armée la désarme
+  aussi. Une touche armée reste allumée, faute de quoi on ne sait plus dans
+  quel registre on tape après avoir levé le doigt.
+
+  Ces touches insèrent de l'Unicode et non de l'ASCII : avec `^` retiré du
+  doigt, il faut un signe qui distingue la charge du corps de la formule. Un
+  `⁻` en exposant ne peut être que la charge, là où `SO42-` se lirait
+  « SO(quarante-deux) ». C'est aussi la forme qu'affichait déjà
+  l'application, et celle que produisent les claviers de téléphone : les
+  trois voies convergent, donc une formule se tape indifféremment aux trois.
+
 - **Valider reste inactif tant que le champ est vide**, comme sur iOS. Sur
   Android, valider vide consommait un point.
 
