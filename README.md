@@ -172,19 +172,32 @@ commentés : la liste iOS, plus courte, fait référence.
 
 ## Déployer sur GitHub Pages
 
+Le dépôt est autonome : il vit dans `mendel-web/`, hors des applications
+natives, et celles-ci ne sont jamais publiées. Il est rattaché à
+`git@github.com:atravert/mendel-web.git`.
+
+Publier une modification revient à :
+
 ```sh
-cd /Users/arnaud/src/mendel
-git init                      # rien n'est encore versionné
-git add mendel-web
-git commit -m "Mendel en PWA"
+cd /Users/arnaud/src/mendel/mendel-web
+make                          # vert obligatoire, et CACHE_VERSION a jour
+git commit -am "..."
+git push
 ```
 
-Puis sur GitHub : dépôt → Settings → Pages → Source : *Deploy from a
-branch*, branche `main`, dossier `/ (root)`. Le `.nojekyll` est déjà là, il
-empêche GitHub Pages de passer le site dans Jekyll.
+GitHub Pages republie automatiquement à chaque `push` sur `main`. La première
+publication demande une à deux minutes.
 
-Le site sera servi depuis `https://<user>.github.io/mendel-web/`. Toutes les
-chemins sont relatifs, donc cela fonctionne sans configuration.
+Le dépôt doit être **public** : GitHub Pages n'est disponible que sur les
+dépôts publics avec un compte gratuit. En privé, il faut GitHub Pro.
+
+Dans Settings → Pages → Source : *Deploy from a branch*, branche `main`,
+dossier `/ (root)`. Le `.nojekyll` est déjà là, il empêche GitHub Pages de
+passer le site dans Jekyll.
+
+Le site est servi depuis **`https://atravert.github.io/mendel-web/`**. Toutes
+les chemins étant relatifs et le `.nojekyll` présent, cela fonctionne sans
+configuration, y compris pour la portée du service worker.
 
 Il n'y a **rien à faire à chaque déploiement** pour purger l'ancien cache.
 `CACHE_VERSION` n'est plus incrémenté à la main : `tools/sync-cache-version.py`
