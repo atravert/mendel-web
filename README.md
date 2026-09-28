@@ -104,15 +104,48 @@ Ces chiffres viennent d'un proxy (corrélation et rapport signal/bruit en
 large bande), pas d'un test d'écoute. **Le seul juge reste l'oreille**, sur
 un téléphone, à 25 % du volume. `make audio-ladder` rejoue la mesure.
 
-Le volume de *lecture* est une autre affaire, et il n'est mesurable par
-aucun proxy : `MUSIC_VOLUME` dans `js/audio.js`. La valeur de 0,25 reprise des
-natives s'est révélée trop forte — le thème passait devant tout et poussait à
-monter le volume de l'appareil, ce qui est l'inverse de l'effet recherché. Il
-est descendu à **0,08**, soit une dizaine de décibels sous les effets (0,8) :
-le rapport de 20 entre un fond et une information est l'écart habituel, et
-c'est ce qui fait que la musique reste un fond quand le téléphone est réglé à
-« moyen ». Si elle reste trop présente, ce n'est qu'une constante à changer,
-mais c'est le seul endroit où la régler.
+Le volume de *lecture* est une autre affaire. Le téléphone est le volume
+maître, et l'application ne doit jamais obliger à le bouger : il faut **un seul
+réglage « normal » qui convienne à la musique et aux effets**. Ce qui compte
+entre les deux constantes n'est pas leur rapport mais l'écart de niveau
+réellement produit, et il se mesure sur les fichiers — `make audio-levels`,
+qui lit `MUSIC_VOLUME` et `EFFECT_VOLUME` dans `js/audio.js` au lieu de
+recopier des valeurs, et signale l'écrêtage comme le creux de boucle.
+
+La mesure a changé le diagnostic. Les sources sont **déjà à des niveaux
+voisins** — le thème à −23,7 dBFS RMS, les effets à −11,3 en moyenne. Il n'y
+avait donc aucune raison de les régler vingt fois différemment. Un rapport de
+20 entre les constantes (0,08 contre 0,8) paraissait raisonnable et produisait
+**32 dB réels** : la musique inaudible, pendant que les effets sortaient à
+−1,9 dBFS de pic, presque à l'écrêtage. Il fallait alors baisser le téléphone
+pour les effets et le remonter pour la musique — aucun réglage ne convenait,
+ce qui est exactement le symptôme décrit.
+
+| | avant (0,08 / 0,8) | après (0,45 / 0,5) |
+|---|---|---|
+| thème, RMS lu | −45,6 dBFS | **−30,6 dBFS** |
+| effets, RMS lu | −13,2 dBFS | **−17,3 dBFS** |
+| effets, pic lu | −1,9 dBFS | **−6,0 dBFS** |
+| écart musique / effets | 32,3 dB (inutilisable) | **13,3 dB** |
+
+La musique remonte de 15 dB — audible à volume normal, sans toucher au
+téléphone — et les effets descendent de 4 dB, ce qui les sort de
+l'écrêtage. L'écart de 13 dB est au milieu de la plage 8–20 dB qui sépare
+d'ordinaire un fond d'une information.
+
+Deux réserves, mesurées et non corrigées :
+
+- **Les trois `wrong_*.wav` sont écrêtés dans la source** (quelques
+  échantillons contre 32767). La distorsion est inscrite dedans : aucun gain ne
+  la redressera. Baisser le gain évite l'écrêtage *supplémentaire* à la
+  lecture, rien de plus. Le fichier est celui de l'app Android, que ce dépôt ne
+  modifie pas.
+- **Le thème se termine par un fondu de 4,5 s, sans fondu de tête.** En
+  boucle, le fond disparaît 4 s toutes les 104 s. L'oreille le perçoit comme un
+  son irrégulier plutôt que comme une coupure, ce qui est exactement le genre
+  de défaut qu'elle remarque sans pouvoir le nommer. Le corriger suppose de
+  rogner la queue dans le `.m4a`, donc de refaire un fichier de 820 Ko : on
+  vous le fera faire exprès, parce que le README le demande.
 
 ---
 

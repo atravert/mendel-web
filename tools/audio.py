@@ -9,6 +9,8 @@ Le theme pese 2,1 Mo, ce qui est enorme pour une musique de fond jouee a
   ladder    pour chaque couple (frequence, debit), quelle taille et quelle
             qualite -- mesurees, pas estimees.
   build     produit le fichier retenu avec les reglages retenus.
+  levels    a quel niveau sortira reellement chaque fichier, une fois
+            multiplie par MUSIC_VOLUME et EFFECT_VOLUME.
 
 Point de methode important : le rééchantillonnage est delegue a afconvert,
 pas fait ici. Un decimateur lineaire maison replie le contenu au-dessus de la
@@ -27,6 +29,7 @@ import array
 import cmath
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -393,6 +396,123 @@ def source_theme():
         "quiz_arcade_theme.mp3")
 
 
+# --- 4. niveaux de lecture --------------------------------------------------
+
+
+def playback_constants(path="js/audio.js"):
+    """Lit MUSIC_VOLUME et EFFECT_VOLUME dans le code.
+
+    L'interet est de ne pas recopier les valeurs dans l'outil: la mesure
+    decrit alors ce que le navigateur fera reellement, et non ce qu'un
+    commentaire promet. Si les deux divergent, la mesure ment, et c'est
+    exactement le piege qu'on cherche a eviter.
+    """
+    with open(path, encoding="utf-8") as handle:
+        source = handle.read()
+
+    values = {}
+    for name in ("MUSIC_VOLUME", "EFFECT_VOLUME"):
+        found = re.search(r"^const\s+%s\s*=\s*([0-9.]+)\s*;" % name, source, re.M)
+        if not found:
+            raise ValueError("js/audio.js: constante %s introuvable" % name)
+        values[name] = float(found.group(1))
+    return values["MUSIC_VOLUME"], values["EFFECT_VOLUME"]
+
+
+def levels_of(samples, rate):
+    """Retourne (rms dBFS, pic dBFS, echantillons ecretes)."""
+    if not samples:
+        return -999.0, -999.0, 0
+    level = db(rms(samples) / 32768.0)
+    peak = db(max(abs(v) for v in samples) / 32768.0)
+    clipped = sum(1 for v in samples if abs(v) >= 32700)
+    return level, peak, clipped
+
+
+def trailing_fade(samples, rate):
+    """Longueur du fondu final, en secondes, s'il y en a un.
+
+    Un theme est joue en boucle. Une queue qui s'eteint, sans tete qui monte,
+    fait disparaitre le fond pendant plusieurs secondes a chaque tour: on ne
+    l'entend pas comme une coupure franche mais comme un son "pas
+    regulier", ce qui est exactement le genre deinctrt que l'oreille remarque
+    sans pouvoir le nommer.
+    """
+    if not samples:
+        return 0.0
+    overall = db(rms(samples) / 32768.0)
+    fenetre = int(rate * 0.5)
+    if len(samples) < 4 * fenetre:
+        return 0.0
+    # On remonte tant que la demi-seconde est plus de 8 dB sous le niveau
+    # general: c'est un fondu, pas un creux.
+    i = len(samples)
+    while i >= fenetre:
+        bloc = samples[i - fenetre:i]
+        if db(rms(bloc) / 32768.0) > overall - 8.0:
+            break
+        i -= fenetre
+    return (len(samples) - i) / rate
+
+
+def levels(theme=DEFAULT_THEME, sfx_dir="audio"):
+    music_volume, effect_volume = playback_constants()
+    work = tempfile.mkdtemp(prefix="mendel-levels-")
+    try:
+        theme_wav = os.path.join(work, "theme.wav")
+        afconvert(["-f", "WAVE", "-d", "LEI16@22050", theme, theme_wav])
+
+        print("constantes lues dans js/audio.js :")
+        print("   MUSIC_VOLUME    = %.2f  (%+.1f dB)" % (music_volume, db(music_volume)))
+        print("   EFFECT_VOLUME   = %.2f  (%+.1f dB)\n" % (effect_volume, db(effect_volume)))
+
+        print("  %-24s %7s %7s   %8s %8s" % ("fichier", "rms", "pic", "rms lu", "pic lu"))
+        print("  %s" % ("-" * 62))
+
+        theme_samples, rate, _ = read_wav(theme_wav)
+        t_rms, t_peak, t_clip = levels_of(theme_samples, rate)
+        print("  %-24s %7.1f %7.1f   %8.1f %8.1f"
+              % ("theme", t_rms, t_peak, t_rms + db(music_volume), t_peak + db(music_volume)))
+
+        effects = sorted(name for name in os.listdir(sfx_dir) if name.endswith(".wav"))
+        rms_list = []
+        clipping = []
+        for name in effects:
+            samples, effect_rate, _ = read_wav(os.path.join(sfx_dir, name))
+            e_rms, e_peak, e_clip = levels_of(samples, effect_rate)
+            rms_list.append(e_rms)
+            if e_clip:
+                clipping.append(name)
+            if e_peak + db(effect_volume) > -0.1:
+                clipping.append(name + " (lecture)")
+            print("  %-24s %7.1f %7.1f   %8.1f %8.1f"
+                  % (name, e_rms, e_peak, e_rms + db(effect_volume),
+                     e_peak + db(effect_volume)))
+
+        moyenne = sum(rms_list) / len(rms_list)
+        ecart = moyenne + db(effect_volume) - (t_rms + db(music_volume))
+        print("\n  ecart musique / effets : %.1f dB" % ecart)
+        if ecart < 8:
+            print("    -> trop serre: le fond et l'information se confondent")
+        elif ecart > 20:
+            print("    -> trop ouvert: la musique devient inaudible au volume normal")
+        else:
+            print("    -> plage habituelle pour un fond (8 a 20 dB)")
+
+        if clipping:
+            print("\n  ATTENTION ecretage : %s" % ", ".join(clipping))
+            print("    les fichiers source sont deja a 0 dBFS, la distorsion est")
+            print("    inscrite dedans: aucun gain ne la redressera")
+
+        fade = trailing_fade(theme_samples, rate)
+        if fade > 1.0:
+            print("\n  fond en boucle : fondu final de %.1f s, sans fondu de tete" % fade)
+            print("    -> le fond disparait %.0f s toutes les %.0f s"
+                  % (fade, len(theme_samples) / rate))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
@@ -410,6 +530,9 @@ def main(argv):
               argv[4] if len(argv) > 4 else DEFAULT_CODEC,
               int(argv[5]) if len(argv) > 5 else DEFAULT_RATE,
               int(argv[6]) if len(argv) > 6 else DEFAULT_BITRATE)
+    elif command == "levels":
+        levels(argv[2] if len(argv) > 2 else DEFAULT_THEME,
+               argv[3] if len(argv) > 3 else "audio")
     else:
         print("commande inconnue: %s" % command)
         return 1

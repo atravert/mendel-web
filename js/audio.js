@@ -13,15 +13,26 @@
 
 const STORAGE_KEY = 'mendel.sound';
 
-// La musique est un fond, pas un morceau qu'on ecoute: elle tourne pendant
-// toute la session. A 0.25 elle prenait le dessus et poussait a monter le
-// volume de l'appareil, exactement l'effet contraire de celui qu'on cherche.
-// 0.08 la place une dizaine de decibels sous les effets (0.8, soit un rapport
-// de 20), ce qui est l'ecart habituel entre un fond et une information. Sur
-// un telephone regle a "moyen", elle doit s'entendre sans qu'on ait envie de
-// couper le son.
-const MUSIC_VOLUME = 0.08;
-const EFFECT_VOLUME = 0.8;   // SoundManager: EFFECT_VOLUME
+// Niveaux de lecture. Le telephone est le volume maitre, et l'application ne
+// doit jamais obliger a le bouger: un seul reglage "normal" doit convenir aux
+// deux flux. Ce qui compte entre ces deux constantes n'est pas leur rapport,
+// mais l'ecart de niveau REEL qu'elles produisent -- et il se mesure sur les
+// fichiers, pas sur les constantes elles-memes.
+//
+// Mesure (`make levels`): le theme est a -23,7 dBFS RMS, les effets a -11,3
+// en moyenne. Les sources sont deja a des niveaux voisins, il n'y a donc pas
+// de raison de les regler tres differemment. Un rapport de 20 entre les
+// constantes -- 0,08 contre 0,8 -- paraissait raisonnable et produisait 32 dB
+// reels: la musique etait inaudible, tandis que les effets sortaient a -1,9
+// dBFS de pic, presque a l'ecretage. Il fallait alors baisser le telephone
+// pour les effets et le remonter pour la musique. Aucun reglage ne convenait.
+//
+// D'ou les valeurs ci-dessous: on remonte la musique, on abaisse les effets.
+// L'ecart tombe a 13 dB, milieu de la plage 8-20 dB qui separe d'ordinaire
+// un fond d'une information, et aucun des deux flux n'approche l'ecretage.
+// Rejouer `make levels` apres toute modification de ces deux nombres.
+const MUSIC_VOLUME = 0.45;
+const EFFECT_VOLUME = 0.5;   // ramene les pics a -6 dBFS: plus d'ecretage a la lecture
 
 const CORRECT_SAMPLES = ['correct_01', 'correct_02', 'correct_03'];
 const WRONG_SAMPLES = ['wrong_01', 'wrong_02', 'wrong_03'];

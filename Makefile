@@ -5,6 +5,7 @@
 #   make data     regenere js/data.js depuis les sources natives
 #   make icons    regenere les icones PWA
 #   make audio    regenere le theme compresse (afconvert, livre avec macOS)
+#   make audio-levels  mesure le niveau de sortie du theme et des effets
 #   make serve    sert le site sur http://localhost:8000
 
 PYTHON ?= python3
@@ -14,7 +15,7 @@ PROD_JS := js/data.js js/quiz.js js/audio.js js/ui.js sw.js
 TEST_JS := tools/tests/dom-stub.js tools/tests/quiz.test.js tools/tests/ui.test.js
 
 .PHONY: all check test verify syntax data icons audio audio-ladder \
-        cache-version cache-check serve clean
+        audio-levels cache-version cache-check serve clean
 
 all: check
 
@@ -70,6 +71,14 @@ audio:
 # Compare les couples (frequence, debit) sur le theme d'origine.
 audio-ladder:
 	@$(PYTHON) tools/audio.py ladder
+
+# Niveau auquel sortira reellement chaque fichier, une fois multiplie par
+# MUSIC_VOLUME et EFFECT_VOLUME, lus dans js/audio.js. Le volume du telephone
+# est le maitre: l'application ne doit pas obliger a le bouger, donc il faut
+# un seul reglage "normal" qui convienne a la musique ET aux effets. C'est le
+# seul controle du volume qui ne depende pas de l'oreille.
+audio-levels:
+	@$(PYTHON) tools/audio.py levels
 
 # Recalcule CACHE_VERSION dans sw.js d'apres l'empreinte des fichiers
 # precaches. A lancer apres toute modification d'un fichier du precache.
