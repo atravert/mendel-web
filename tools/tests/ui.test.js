@@ -24,8 +24,21 @@ function startTopic(topicId) {
   button.fire('click');
 }
 
-function submit() {
-  document.getElementById('answer-form').fire('submit');
+/**
+ * Le geste de confirmation par la touche retour du clavier: `keydown` sur le
+ * champ, avec `key: 'Enter'`.
+ *
+ * C'est le chemin que le joueur utilise le plus, et c'est celui qui a
+ * reellement echoue sur iPhone. Il merite donc d'etre celui qu'exerce la
+ * majorite des tests plutot que d'etre un chemin secondaire verifie a part.
+ */
+function pressEnter() {
+  return input.fire('keydown', { key: 'Enter' });
+}
+
+/** Le meme geste, mais par le bouton Valider. */
+function clickValidate() {
+  return document.getElementById('validate-button').fire('click');
 }
 
 /** Simule une frappe: le champ se remplit et l'evenement input se declenche. */
@@ -114,7 +127,7 @@ check('l\'enonce est compose de texte simple', currentPrompt().indexOf('<') === 
   type(answer);
   check('Valider devient actif apres saisie',
     document.getElementById('validate-button').disabled, false);
-  submit();
+  pressEnter();
 
   check('score incremente', document.getElementById('score-text').textContent, 'Score : 1');
   check('retour au vert', document.getElementById('feedback').className,
@@ -175,7 +188,7 @@ ok('la question 2 est differente de la question 1', currentPrompt() !== firstPro
 
 {
   type('uneReponseQuiNexistePas');
-  submit();
+  pressEnter();
 
   check('retour en rouge', document.getElementById('feedback').className,
     'feedback feedback--wrong');
@@ -201,7 +214,7 @@ ok('la question 2 est differente de la question 1', currentPrompt() !== firstPro
 document.getElementById('next-button').fire('click');
 {
   type('   ');
-  submit();
+  pressEnter();
   check('une reponse vide ne compte pas',
     document.getElementById('score-text').textContent, 'Score : 1');
   check('Valider se reactive des que le champ se vide',
@@ -228,7 +241,7 @@ check('serie d\'ions affichee', document.getElementById('progress-text').textCon
     if (!document.getElementById('symbol-bar').hidden) found = step;
     else {
       type(expectedAnswer(currentPrompt()) || 'x');
-      submit();
+      pressEnter();
       document.getElementById('next-button').fire('click');
     }
   }
@@ -240,7 +253,7 @@ check('serie d\'ions affichee', document.getElementById('progress-text').textCon
   // Le rendu des indices doit produire de vrais <sub>/<sup>.
   const formula = expectedAnswer(currentPrompt());
   input.value = 'mauvaise';
-  submit();
+  pressEnter();
   const feedback = document.getElementById('feedback');
   const scripts = feedback.children.filter((c) => c.tagName === 'SUB' || c.tagName === 'SUP');
   check('la reponse revelee utilise des <sub>/<sup> pour une formule',
@@ -262,7 +275,7 @@ startTopic('ions');
   for (let step = 0; step < 10; step += 1) {
     if (!document.getElementById('symbol-bar').hidden) break;
     type(expectedAnswer(currentPrompt()) || 'x');
-    submit();
+    pressEnter();
     document.getElementById('next-button').fire('click');
   }
 }
@@ -457,7 +470,7 @@ check('insertion dans une selection', input.value, '-(O3');
   indice.fire('click');
   check('indice arme avant de changer de question', indice.getAttribute('aria-pressed'), 'true');
   type('zzz');
-  submit();
+  pressEnter();
   document.getElementById('next-button').fire('click');
   check('le mode se reinitialise a la question suivante',
     indice.getAttribute('aria-pressed'), 'false');
@@ -512,7 +525,7 @@ function unicodeFormula(formula) {
     if (match) target = match;
     else {
       type(expectedAnswer(currentPrompt()) || 'zzz');
-      submit();
+      pressEnter();
       document.getElementById('next-button').fire('click');
     }
   }
@@ -525,7 +538,7 @@ function unicodeFormula(formula) {
   // data.js: c'est ce que voit le joueur, et ce que produit la touche.
   check('le champ contient la forme Unicode', input.value, unicodeFormula(target.formula));
 
-  submit();
+  pressEnter();
   check('la formule composee a la barre est acceptee',
     document.getElementById('feedback').className, 'feedback feedback--correct');
   check('le score augmente', document.getElementById('score-text').textContent !== scoreBefore, true);
@@ -573,7 +586,7 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   let focusPerdu = 0;
   for (let question = 0; question < 3; question += 1) {
     type(expectedAnswer(currentPrompt()) || 'x');
-    submit();
+    pressEnter();
     if (document.activeElement !== input) focusPerdu += 1;
     document.getElementById('next-button').fire('click');
     // Aucune minuterie: le focus doit etre deja pose quand le clic rend la
@@ -594,7 +607,7 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   // fait lever le clavier des la premiere question, sans clic sur le champ.
   input.blur();
   type(expectedAnswer(currentPrompt()) || 'x');
-  submit();
+  pressEnter();
   document.getElementById('next-button').fire('click');
   check('un focus manuel est repris a la question suivante',
     document.activeElement === input, true);
@@ -616,7 +629,7 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   let last = currentPrompt();
   for (let question = 0; question < QUESTIONS_PER_SERIES + 2; question += 1) {
     type(expectedAnswer(last) || 'x');
-    submit();
+    pressEnter();
     document.getElementById('next-button').fire('click');
     if (visible('result')) break;
     last = currentPrompt();
@@ -627,13 +640,23 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
 }
 
 // ---------------------------------------------------------------------------
-// La touche retour du clavier
+// ---------------------------------------------------------------------------
+// La touche retour du clavier, et les deux chemins de confirmation
 // ---------------------------------------------------------------------------
 
-// `enterkeyhint="done"` fait que le clavier entree soumet le formulaire. La
-// touche doit donc valoir Valider PUIS Question suivante: c'est le geste le
-// plus repete de la serie, et lui faire viser un bouton entre les deux
-// multipliait les manipulations par deux.
+// Mesure de terrain: sur iPhone, la premiere pression de la touche retour
+// valait la reponse, la seconde ne passait PAS a la question suivante. Elle
+// passait par la soumission implicite du formulaire, dont iOS ne garantit pas
+// le second passage.
+//
+// Le remede n'est pas de retenter la soumission, c'est de ne plus en dependre.
+// Chaque source d'entree a son chemin, exactement un:
+//   - la touche retour, par `keydown`;
+//   - le bouton Valider, par `click`, en `type="button"`.
+// Aucun ecouteur ne sert les deux, donc aucune course n'est possible entre
+// eux. Ecouter `keydown` ET `submit` aurait paru plus robuste, et aurait
+// introduit le defaut inverse: une pression qui valide ET avance, donc une
+// question sautee.
 {
   // Le fichier est arrive a la question 10/10, ou le retour suivant affiche le
   // resultat: ce qu'on veut tester ici, c'est le passage a la question
@@ -645,15 +668,26 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
 
   // Premier retour: la reponse est comptee, le retour s'affiche.
   type(reponse);
-  submit();
+  const evt = pressEnter();
   check('le retour compte la reponse',
     document.getElementById('feedback').className, 'feedback feedback--correct');
   check('le retour montre le commentaire',
     document.getElementById('feedback').hidden, false);
 
+  // Une seule pression, une seule question consommee. C'est LA course a
+  // eviter, et elle ne se verrait pas si la touche ne faisait qu'une chose:
+  // il faudrait lire les deux assertions ci-dessous.
+  check('une seule pression ne consomme pas deux questions',
+    document.getElementById('progress-text').textContent, 'Question 1 / 10');
+
+  // L'evenement est annule, donc le navigateur ne soumet rien. C'est ce qui
+  // rend le chemin du formulaire inoffensif: il ne peut plus doubler l'effet
+  // de la touche.
+  check('la touche retour annule l\'evenement', evt.defaultPrevented, true);
+
   // Second retour: on avance, sans recompter le point deja acquis.
   const scoreAvant = document.getElementById('score-text').textContent;
-  submit();
+  pressEnter();
   check('le second retour passe a la question suivante',
     currentPrompt() !== promptAvant, true);
   check('le second retour ne recompte pas',
@@ -670,10 +704,53 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   // valider, donc rien a faire.
   const promptVide = currentPrompt();
   const scoreVide = document.getElementById('score-text').textContent;
-  submit();
+  pressEnter();
   check('un retour a vide ne fait rien',
     currentPrompt() === promptVide && document.getElementById('score-text').textContent === scoreVide,
     true);
+
+  // ---- Le bouton Valider, chemin distinct -------------------------------
+  //
+  // Il doit valider, et ne peut pas enchainer: il est desactive apres la
+  // reponse. C'est ce qui laisse les deux chemins disjoints -- la touche
+  // enchaine, le bouton non.
+  const promptBouton = currentPrompt();
+  type(expectedAnswer(promptBouton));
+  clickValidate();
+  check('le bouton Valider compte la reponse',
+    document.getElementById('feedback').className, 'feedback feedback--correct');
+  check('le bouton Valider ne passe pas a la question suivante',
+    currentPrompt(), promptBouton);
+  check('le bouton Valider se desactive',
+    document.getElementById('validate-button').disabled, true);
+
+  // Une soumission du formulaire ne doit RIEN faire, et ne doit meme pas
+  // valider: si elle validait, une soumission implicite passant par la touche
+  // retour doublerait l'effet -- compter, puis avancer.
+  const promptApresBouton = currentPrompt();
+  const scoreApresBouton = document.getElementById('score-text').textContent;
+  const evtSoumission = document.getElementById('answer-form').fire('submit');
+  check('une soumission du formulaire est annulee', evtSoumission.defaultPrevented, true);
+  check('une soumission du formulaire ne fait rien',
+    currentPrompt() === promptApresBouton
+      && document.getElementById('score-text').textContent === scoreApresBouton,
+    true);
+  check('une soumission ne valide pas non plus',
+    currentPrompt() === promptApresBouton, true);
+
+  // Le mode d'indice ou d'exposant arme tombe au retour: il annonce ce que la
+  // PROCHAINE frappe inserera, et la reponse est desormais comptee.
+  //
+  // `arm('sub')` arme l'exposant, qui n'est pas le mode demande par la barre
+  // de cette serie d'ions; le test porte sur la levee, pas sur le mode.
+  startTopic('ions');
+  arm('sub');
+  const cleExposant = dom.scriptKeys[0];
+  check('le mode est arme', cleExposant.getAttribute('aria-pressed'), 'true');
+  type(expectedAnswer(currentPrompt()));
+  pressEnter();
+  check('le retour leve le mode arme',
+    cleExposant.getAttribute('aria-pressed'), 'false');
 }
 
 // ---------------------------------------------------------------------------
@@ -697,6 +774,43 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
     input.fire('pointerdown').defaultPrevented, false);
   check('la parade ne bloque pas le clic qui suit',
     validate.fire('click').defaultPrevented, false);
+}
+
+// Le bouton son a sa propre parade, et elle n'est pas optionnelle.
+//
+// Il est centre sur la ligne de progression: il est donc VISUELLEMENT dans
+// l'ecran de quiz, mais il reste un enfant de `body`, en `position: fixed`
+// pour passer au-dessus des trois ecrans. #screen-quiz ne le contient pas, et
+// la parade du conteneur ne le voit pas. Sans la sienne, baisser le son en
+// pleine serie donne le focus au bouton, vide le champ, ferme le clavier, et
+// fait sauter l'ecran -- le tremblement exact qu'on vient de supprimer.
+{
+  const son = document.getElementById('sound-toggle');
+
+  check('le bouton son bloque la prise de focus',
+    son.fire('pointerdown').defaultPrevented, true);
+  check('le bouton son ne bloque pas le clic qui suit',
+    son.fire('click').defaultPrevented, false);
+
+  // Et le comportement doit rester entier: baisser puis relever le son, avec
+  // le curseur dans le champ tout du long.
+  startTopic('elements');
+  const pressedAvant = son.getAttribute('aria-pressed');
+
+  check('le curseur est dans le champ avant de baisser le son',
+    document.activeElement === input, true);
+  son.fire('pointerdown');
+  son.fire('click');
+  check('le son a bien ete coupe',
+    son.getAttribute('aria-pressed') !== pressedAvant, true);
+  check('le curseur est reste dans le champ apres le bouton son',
+    document.activeElement === input, true);
+
+  son.fire('pointerdown');
+  son.fire('click');
+  check('le son est revenu', son.getAttribute('aria-pressed'), pressedAvant);
+  check('le curseur est toujours dans le champ',
+    document.activeElement === input, true);
 }
 
 // ---------------------------------------------------------------------------

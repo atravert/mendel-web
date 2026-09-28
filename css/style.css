@@ -26,6 +26,12 @@
 
   --gap: 16px;
   --pad: 20px;
+
+  /* Hauteur de la ligne "Question X / 10 ... Score : Y". Explicite, parce que
+     le bouton son vient se centrer dessus: mesuree au doigt, la ligne ferait
+     22 px un jour et 24 l'autre, et l'icone derivait. Les deux reglas lisent
+     la meme variable, donc elles ne peuvent plus diverger. */
+  --progress-h: 22px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -183,6 +189,35 @@ html[data-keyboard='open'] { --safe-bottom: 0px; }
 
 .sound-toggle:active { background: var(--surface); }
 
+/* Sur l'ecran de quiz, l'icone se centre sur la ligne "Question X / 10 ...
+   Score : Y" plutot que de se tenir en haut a droite.
+
+   L'ecran de quiz est ancre en haut (voir plus haut), donc cette ligne est
+   TOUJOURS la premiere de l'ecran, a la meme hauteur quel que soit l'etat du
+   clavier. C'est ce qui rend un centrage possible sans la mesurer en direct,
+   et sans la bouger quand le clavier se leve.
+
+   La position est donc calculee, pas mesuree: la meme marge que
+   `.shell`, plus la moitie de la ligne moins la moitie du bouton. Le centre
+   tombe a `var(--pad) + encoche + 11 px`, ce qui est exactement le centre de
+   la ligne. Sans `var(--progress-h)`, il faudrait ecrire 11 en dur, et la
+   ligne pourrait changer de hauteur sans que l'icone s'en apercoive.
+
+   `:has()` est Safari 15.4 et plus. En dessous, l'icone reste en haut a
+   droite, c'est-a-dire exactement la position precedente: la degradation
+   n'est pas une panne. Le motif cible l'ecran de quiz SEUL, parce que la
+   ligne de progression n'existe que la -- et sur l'ecran de resultat le
+   contenu est centre et peut etre haut, un commentaire retro d'unequis
+   debordant largement. */
+body:has(#screen-quiz:not([hidden])) .sound-toggle {
+  left: 50%;
+  right: auto;
+  top: calc(
+    var(--pad) + env(safe-area-inset-top) + (var(--progress-h) - var(--tap)) / 2
+  );
+  transform: translateX(-50%);
+}
+
 /* --------------------------------------------------------------------------
    Boutons
    -------------------------------------------------------------------------- */
@@ -255,8 +290,10 @@ html[data-keyboard='open'] { --safe-bottom: 0px; }
 
 .progress-row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--gap);
+  min-height: var(--progress-h);
   color: var(--text-muted);
   font-size: 15px;
 }

@@ -395,7 +395,54 @@ function toggleScript(mode) {
  * indispensable: sans lui le navigateur insererait aussi le "3" ASCII et on
  * obtiendrait "SO₄3".
  */
+/**
+ * Le geste de confirmation, quel que soit le doigt qui le fait.
+ *
+ * La touche retour du clavier, et le bouton Valider. `state.answered` fait
+ * l'arbitrage: une reponse non encore comptee est comptee, une reponse deja
+ * comptee fait passer a la suite. C'est aussi le garde-fou -- le point gagne
+ * une fois ne peut pas l'etre deux, quelle que soit la touche.
+ */
+function onEnter() {
+  if (state.answered) next();
+  else validate();
+}
+
 function onKeydown(event) {
+  // La touche retour passe par ICI, et volontairement pas par la soumission du
+  // formulaire. Mesure de terrain: sur iPhone, la premiere pression valait
+  // bien la reponse -- l'auto-soumission du formulaire fonctionne -- mais la
+  // seconde ne passait pas a la question suivante. Un chemin qui depend d'un
+  // comportement d'auto-soumission n'est pas un chemin fiable, meme quand il
+  // parait marcher.
+  //
+  // D'ou la regle qui rend le double declenchement impossible: UNE source
+  // d'entree, UN chemin.
+  //
+  //   - la touche retour passe par keydown, ici meme;
+  //   - le bouton Valider est `type="button"` et porte son propre `click`.
+  //
+  // Il n'y a donc aucune soumission implicite a arbitrer, donc aucune
+  // fenetre de course entre les deux. Ecouter a la fois `keydown` ET `submit`
+  // aurait para plus robuste, et aurait introduce exactement le defaut qu'on
+  // cherche a eviter: une seule pression qui valide ET avance, donc une
+  // question sautee par accident. `SubmitEvent.submitter`, qui distingue les
+  // deux sources, n'est disponible que depuis Safari 15.4 -- trop recent pour
+  // etre pose ici.
+  if (event.key === 'Enter') {
+    // Annule la soumission implicite. Sans cela, le navigateur soumet le
+    // formulaire, et le gestionnaire `submit` -- volontairement vide, plus
+    // bas -- ne ferait rien: le resultat serait le meme, mais par un chemin
+    // qu'on ne maitrise pas.
+    event.preventDefault();
+    // Un mode d'indice ou d'exposant arme est invalide des que la reponse
+    // est comptee: il annonce ce que la PROCHAINE frappe inserera, et il
+    // n'y aura pas de prochaine frappe dans cette question.
+    setScript(null);
+    onEnter();
+    return;
+  }
+
   const step = scriptInput(state.script, event.key);
   if (!step) return;
 
@@ -483,28 +530,25 @@ for (const button of document.querySelectorAll('[data-topic]')) {
 }
 
 /**
- * La touche retour du clavier est a la fois Valider et Question suivante.
+ * Le formulaire ne fait plus que porter la semantique -- un champ et son
+ * bouton de confirmation, grouping utile aux lecteurs d'ecran.
  *
- * `enterkeyhint="done"` fait que le clavier entree soumet le formulaire, donc
- * que `validate()` s'execute -- c'etait deja le cas. Ce qui manquait: une fois
- * la reponse comptee, la meme touche doit passer a la question suivante. Sans
- * ca, il faut lever le doigt, viser le bouton Suivant, poser le doigt: trois
- * gestes la ou un seul suffit, et c'est le geste le plus repete de la serie.
+ * Il n'est plus le mecanisme de la touche retour: celle-ci passe par
+ * `onKeydown`, et le bouton est `type="button"`. Chaque source d'entree a
+ * donc son chemin, et aucun n'a de course possible avec l'autre.
  *
- * Le champ n'etant plus `disabled` apres validation, la soumission peut
- * revenir autant de fois que l'utilisateur veut: c'est `state.answered` qui
- * rend l'operation idempotente, et c'est lui qui distingue les deux etats.
- *
- * Le clic sur Valider garde son sens unique: le bouton est desactive apres
- * validation, donc rien n'arrive si on le touche. Seule la touche du clavier
- * peut enchainer, ce qui evite qu'un second clic fasse sauter une question
- * par megarde.
+ * Il ne reste ici qu'une garde, et elle est necessaire: le formulaire n'a plus
+ * de bouton de soumission, mais un formulaire a un seul champ reste soumis
+ * implicitement par la touche retour sur certains navigateurs. Sans cette
+ * garde, la page pourrait se recharger en plein milieu d'une serie. Elle ne
+ * fait rien d'autre, deliberement -- appeler `onEnter()` ici retablirait
+ * exactement la course que le decoupage ci-dessus supprime.
  */
 el.form.addEventListener('submit', (event) => {
   event.preventDefault();
-  if (state.answered) next();
-  else validate();
 });
+
+el.validateButton.addEventListener('click', onEnter);
 
 el.nextButton.addEventListener('click', next);
 el.restartButton.addEventListener('click', () => startQuiz(state.topic));
@@ -534,6 +578,21 @@ el.symbolBar.addEventListener('pointerdown', (event) => {
 // defilement du doigt, comme sur les deux natives.
 el.screens.quiz.addEventListener('pointerdown', (event) => {
   if (event.target.closest('button')) event.preventDefault();
+});
+
+// Le bouton son a besoin de la meme parade, et pour une raison qui n'existait
+// pas avant: il est centre sur la ligne de progression, donc il est
+// VISUELLEMENT dans l'ecran de quiz, mais il reste un enfant de `body` -- il
+// est en `position: fixed` pour passer au-dessus des trois ecrans. Le
+// conteneur #screen-quiz ne le contient donc pas, et la parade ci-dessus ne
+// le voit pas.
+//
+// Un bouton qui prend le focus vide le champ, le clavier se ferme, le viewport
+// passe de 508 a 844 px, et toute la page se recentre. Autrement dit: baisser
+// le son en pleine serie declenche exactement le tremblement que la parade
+// vient d eliminer, et par la meme cause.
+el.soundToggle.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
 });
 
 for (const key of el.symbolBar.querySelectorAll('[data-insert]')) {

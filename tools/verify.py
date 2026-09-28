@@ -414,6 +414,126 @@ def check_keyboard_inset(errors):
     return count
 
 
+def check_confirm_paths(errors):
+    """Une source d'entree, un chemin. Le formulaire ne peut rien valider.
+
+    Le remede au defaut iPhone -- le second retour ne passait pas a la question
+    suivante -- a ete de ne plus dependre de la soumission implicite. La
+    touche retour passe par `keydown`, le bouton Valider par `click`.
+
+    Ce decoupage ne tient que si les deux sources ne peuvent pas se
+    retrouver: un formulaire a bouton `type="submit"` se soumet implicitement
+    quand la touche retour n'a pas ete annulee, donc la touche ferait
+    valider PUIS avancer, en une seule pression. Une question sautee par
+    megarde, silencieusement.
+
+    Aucun test JS ne peut voir cela: le stub ignore le `type` d'un bouton, et
+    ne produit aucune soumission implicite. C'est donc un controle statique,
+    et il porte sur les DEUX moillons -- le `type` du bouton, et l'inertie du
+    gestionnaire `submit`.
+    """
+    html = read("index.html")
+    src = strip_comments(read("js/ui.js"))
+    count = 0
+
+    bouton = re.search(r"<button[^>]*id=\"validate-button\"", html, re.S)
+    if not bouton:
+        errors.append("index.html: bouton #validate-button introuvable")
+        return 0
+    count += 1
+    type_attr = re.search(r"type=\"(\w+)\"", bouton.group(0))
+    if not type_attr or type_attr.group(1) != "button":
+        errors.append("index.html: #validate-button est type=%s. Il doit etre "
+                      "type=button: avec un bouton de soumission, la touche "
+                      "retour declenche une soumission implicite qui double "
+                      "l'effet de onKeydown et fait sauter une question."
+                      % (type_attr.group(1) if type_attr else "?"))
+
+    # Le gestionnaire `submit` doit rester inerte: annuler, et rien d'autre.
+    corps = re.search(r"addEventListener\(\s*'submit'.*?\{(.*?)\}\)", src, re.S)
+    if not corps:
+        errors.append("js/ui.js: aucun gestionnaire submit sur le formulaire. "
+                      "Sans lui, une soumission implicite pourrait recharger "
+                      "la page en plein milieu d'une serie.")
+    else:
+        count += 1
+        for interdit in ("onEnter(", "validate(", "next("):
+            if interdit in corps.group(1):
+                errors.append("js/ui.js: le gestionnaire submit appelle %s. Il "
+                              "doit se contenter d'annuler: c'est la touche "
+                              "retour qui valide, via keydown." % interdit)
+    return count
+
+
+def check_sound_placement(errors):
+    """L'icone son se centre sur la ligne de progression, via une hauteur partagee.
+
+    Aucun test JS ne peut voir une mise en page. La position demandee --
+    l'icone au centre de la ligne "Question X / 10 ... Score : Y" -- repose
+    donc entierement sur du CSS, et sur une hypothese qu'aucun test ne peut
+    verifier: que cette ligne fait toujours la meme hauteur.
+
+    D'ou `--progress-h`, lise par `.progress-row` ET par la regle de
+    centrage. Les deux ne peuvent plus diverger: c'est le contrat lui-meme qui
+    tient l'alignement, pas une valeur recopiee qui derivera un jour.
+
+    On verifie aussi que la regle de centrage ne vise QUE l'ecran de quiz. La
+    ligne de progression n'existe que la; sur l'ecran de resultat le contenu
+    est centre et peut remonter haut, sous un commentaire retro d'unequis. Et
+    la position par defaut en haut a droite doit rester, pour que `:has()` non
+    supporte -- Safari avant 15.4 -- degrade vers l'existant, pas vers une
+    panne.
+    """
+    regles = parse_rules(strip_comments(read("css/style.css")))
+    count = 0
+
+    if "--progress-h" not in read("css/style.css"):
+        errors.append("style.css: --progress-h n'est pas definie")
+    else:
+        count += 1
+
+    ligne = regles.get(".progress-row")
+    if ligne is None:
+        errors.append("style.css: regle .progress-row introuvable")
+    elif "var(--progress-h)" not in ligne:
+        errors.append("style.css: .progress-row ne lit pas --progress-h: sa "
+                      "hauteur peut deriver de celle utilisee pour centrer "
+                      "l'icone son")
+    else:
+        count += 1
+
+    defaut = regles.get(".sound-toggle")
+    if defaut is None:
+        errors.append("style.css: regle .sound-toggle introuvable")
+    else:
+        count += 1
+        if "right:" not in defaut or "left:" in defaut:
+            errors.append("style.css: .sound-toggle ne se positionne plus en haut "
+                          "a droite par defaut: sans `:has()`, l'icone se "
+                          "retrouverait au coin oppose")
+
+    centres = [(sel, corps) for sel, corps in regles.items()
+               if sel.endswith(" .sound-toggle") and sel != ".sound-toggle"]
+    if not centres:
+        errors.append("style.css: aucune regle ne centre .sound-toggle")
+    else:
+        count += 1
+        for selecteur, corps in centres:
+            if "#screen-quiz" not in selecteur:
+                errors.append("style.css: le centrage de l'icone son vise `%s`, "
+                              "alors que la ligne de progression n'existe que "
+                              "sur l'ecran de quiz" % selecteur)
+            for attendu in ("var(--progress-h)", "var(--tap)"):
+                if attendu not in corps:
+                    errors.append("style.css: le centrage de l'icone son "
+                              "n'utilise pas %s, donc il n'est pas aligne sur "
+                              "la ligne de progression" % attendu)
+            if "left: 50%" not in corps or "translateX(-50%)" not in corps:
+                errors.append("style.css: le centrage de l'icone son ne se centre "
+                              "pas horizontalement (left: 50%% + translateX(-50%%))")
+    return count
+
+
 def main():
     errors = []
     precache = check_precache(errors)
@@ -426,6 +546,8 @@ def main():
     viewport = check_viewport(errors)
     centering = check_centering(errors)
     keyboard = check_keyboard_inset(errors)
+    confirm = check_confirm_paths(errors)
+    son = check_sound_placement(errors)
 
     print("precache service worker : %d entrees" % precache)
     print("references dans HTML    : %d" % html_refs)
@@ -437,6 +559,8 @@ def main():
     print("variables viewport CSS  : %d" % viewport)
     print("centrage de .screen     : %d" % centering)
     print("marge clavier           : %d" % keyboard)
+    print("chemins de confirmation: %d" % confirm)
+    print("placement du son      : %d" % son)
 
     if errors:
         print()

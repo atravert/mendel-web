@@ -31,8 +31,8 @@ Trois contrôles, tous exécutables sans rien installer :
 | Commande | Ce qu'elle fait |
 |---|---|
 | `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. |
-| `make test` | 249 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
-| `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS, ancrage du centrage, marge de l'indicateur d'accueil. |
+| `make test` | 266 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
+| `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS, ancrage du centrage, marge de l'indicateur d'accueil, chemins de confirmation, placement de l'icône du son. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
 
 Le harnais a deux extensions qui méritent d'être connues, parce qu'elles
@@ -273,29 +273,72 @@ n'est visible que sur les deux autres écrans, qui restent centrés.
 
 ### La touche retour du clavier
 
-`enterkeyhint="done"` fait que la touche retour du clavier soumet le
-formulaire : elle valait donc déjà la réponse. Ce qui manquait était la
-moitié suivante — **une fois la réponse comptée, la même touche passe à la
-question suivante.**
+**Mesure de terrain : sur iPhone, ça n'a jamais marché.** La première pression
+valait bien la réponse ; la seconde ne passait pas à la question suivante.
 
-```js
-el.form.addEventListener('submit', (event) => {
-  event.preventDefault();
-  if (state.answered) next();
-  else validate();
-});
-```
+La cause est le mécanisme lui-même. La touche retour ne faisait rien par
+elle-même : elle soumettait le formulaire, et c'était le gestionnaire `submit`
+qui validait puis enchaînait. Or la soumission *implicite* — le formulaire
+n'ayant pas de bouton de soumission, la touche retour en déclenche une —
+n'est pas fiable sur iOS. La première passe, la suivante non. Un chemin qui
+dépend d'un comportement qu'on n'a pas vérifié n'est pas un chemin fiable,
+même quand il paraît marcher.
 
-C'est le geste le plus répété de la série. Lui faire viser le bouton Suivant
-entre les deux multipliait les manipulations par deux : lever le doigt, viser,
-poser. Un seul geste à la place.
+Le remède n'a donc pas été de retenter la soumission, mais de **ne plus en
+dépendre**. Une source d'entrée, un chemin, exactement :
 
-`state.answered` fait toute l'arbitrage, et il fait aussi le garde-fou : le
-point gagné une fois ne peut pas être recompte, quelle que soit la touche. Le
-clic sur Valider garde son sens unique — le bouton est `disabled` après
-validation, donc rien n'arrive si on le touche. Seule la touche du clavier peut
-enchaîner, ce qui évite qu'un second clic fasse sauter une question par mégarde.
+| Source | Chemin | Ne peut pas |
+|---|---|---|
+| touche retour | `keydown` dans `onKeydown()` | ne peut pas doubler l'effet |
+| bouton Valider | `click`, en `type="button"` | ne peut pas enchaîner |
 
+Le bouton Valider est passé en `type="button"` : avec un bouton de soumission
+dans le formulaire, une soumission implicite peut suivre la touche retour, et
+une seule pression validerait **puis** avancerait. Une question sautée par
+accident, silencieusement. `SubmitEvent.submitter`, qui distingue les deux
+sources, n'existe que depuis Safari 15.4 — trop récent pour en faire la base.
+
+Écouter `keydown` **et** `submit` aurait paru plus robuste. C'est
+l'inverse : les deux se déclencheraient sur la même pression, et la course
+entre eux vaudrait exactement le défaut qu'on cherche à éviter. D'où
+`make verify`, qui refuse un `#validate-button` en `type="submit"` et un
+gestionnaire `submit` qui appellerait `onEnter()`.
+
+Le geste lui-même reste le plus répété de la série : la touche vaut Valider
+**puis** Question suivante, là où il fallait lever le doigt, viser le bouton
+Suivant, poser le doigt. `state.answered` fait tout l'arbitrage, et fait
+aussi le garde-fou : le point gagné une fois ne peut pas être recompte.
+
+### L'icône du son, centrée sur la ligne de progression
+
+L'icône se tient au centre de la ligne « Question X / 10 … Score : Y » pendant
+la série. L'écran de quiz étant ancré en haut, cette ligne est toujours la
+première de l'écran, à la même hauteur quel que soit l'état du clavier — c'est
+ce qui rend un centrage possible sans la mesurer en direct, et sans qu'elle
+bouge quand le clavier se lève.
+
+La position est **calculée**, pas mesurée : la même marge que `.shell`, plus la
+moitié de la ligne moins la moitié du bouton. La hauteur de la ligne est donc
+une variable partagée, `--progress-h`, lue par `.progress-row` **et** par la
+règle de centrage. Les deux ne peuvent pas diverger. Un `11px` en dur aurait
+été la même chose, jusqu'au jour où la ligne aurait changé de hauteur et où
+l'icône aurait dérivé sans que personne ne le voie.
+
+Le centrage ne vise que l'écran de quiz, par `body:has(#screen-quiz:not([hidden]))`.
+La ligne de progression n'existe que là, et sur l'écran de résultat le contenu
+est centré et peut remonter haut, sous un commentaire rétro d'unequis. `:has()`
+demande Safari 15.4 ; en dessous, l'icône reste en haut à droite, c'est-à-dire
+la position précédente — la dégradation n'est pas une panne.
+
+**Le bouton son a aussi eu besoin de sa parade anti-prise de focus, pour une
+raison qui n'existait pas avant.** Il est `position: fixed`, donc enfant de
+`body` : il est *visuellement* dans l'écran de quiz sans en être un descendant,
+et la parade enregistrée sur `#screen-quiz` ne le voyait pas. Un bouton qui
+prend le focus vide le champ, ferme le clavier, et fait sauter l'écran — baisser
+le son en pleine série déclenchait le tremblement qu'on venait de supprimer, et
+par la même cause.
+
+### Ce qui est vérifié, et comment
 ### Ce qui est vérifié, et comment
 
 Le harnais n'a **aucune minuterie**, délibérément. Avec un `setTimeout`, un
@@ -322,11 +365,18 @@ parade vérifiée dans le vide n'est pas vérifiée.
 | la touche retour passe ensuite à la suivante | l'énoncé change, champ vidé |
 | la touche retour ne recompte pas | score identique avant et après |
 | un retour à vide ne fait rien | ni validation ni passage |
+| une pression ne consomme qu'une question | progression inchangée après validation |
+| la touche annule l'événement | `defaultPrevented`, donc pas de soumission |
+| une soumission du formulaire ne fait rien | ni validation ni passage |
+| le bouton Valider valide, sans enchaîner | le bouton est `disabled` après |
+| le retour lève le mode indice/exposant armé | `aria-pressed` à `false` |
+| le bouton son bloque la prise de focus | `pointerdown` annulé, `click` non |
+| le bouton son ne coûte pas le focus au joueur | `activeElement === input` après |
 | l'énoncé ne bouge pas quand la hauteur change | `.screen-quiz` sans marge auto |
 | la barre d'adresse n'est pas un clavier | `data-keyboard` absent à 790 px |
 | l'indicateur d'accueil s'écarte avec le clavier | `data-keyboard="open"` à 508 px |
 
-Seize régressions ont été introduites puis vérifiées comme détectées : le focus
+Vingt-deux régressions ont été introduites puis vérifiées comme détectées : le focus
 volé par Suivant, le champ `disabled` après validation, le focus reporté d'une
 micro-tâche, la parade retirée, la parade restreinte à un seul bouton,
 `readOnly` réintroduit, le `blur()` de fin de série retiré, le focus de
@@ -334,7 +384,11 @@ micro-tâche, la parade retirée, la parade restreinte à un seul bouton,
 touche retour avancée sans avoir validé, l'écran de quiz recentré,
 l'`auto` remonté sur le quiz, la marge d'accueil non remise à zéro,
 l'attribut renommé d'un seul côté, la variable non consommée, l'écran de
-résultat décentré, et le retour à `justify-content: center`.
+résultat décentré, le retour à `justify-content: center`, la touche retour
+réduite à une validation, le gestionnaire `submit` redevenu actif, la parade
+du bouton son retirée, la ligne de progression détachée de `--progress-h`, le
+centrage appliqué à tous les écrans, et le centrage remplacé par une valeur
+mesurée à l'œil.
 
 Trois de ces contrôles ont eux-mêmes eu besoin d'être repris, parce qu'ils
 passaient au vert sur du CSS absent :
@@ -578,6 +632,15 @@ parce qu'ils sont écrits dans un autre langage :
   remettre `--safe-bottom` à zéro. Même nature de contrat, et cette fois la
   **valeur** est vérifiée : `--safe-bottom: 34px` cite la variable et ne rend
   pas un pixel.
+- la touche retour et le bouton Valider ne peuvent pas se rejoindre. Aucun test
+  JS ne voit le `type` d'un bouton, ni ne produit de soumission implicite :
+  `make verify` exige `#validate-button` en `type="button"` et un gestionnaire
+  `submit` qui se contente d'annuler.
+- `--progress-h` est lue par `.progress-row` et par la règle de centrage de
+  l'icône du son. C'est le contrat qui tient l'alignement, pas une valeur
+  recopiée qui dériverait un jour. Changer la variable déplace les deux d'un
+  coup — et c'est **voulu** : la mutation `--progress-h: 40px` passe le contrôle
+  vert, parce qu'elle conserve le contrat.
 
 Ces contrôles passent au vert sur du CSS absent, ce qui est leur mode de panne
 préféré. D'où le `parse_rules()` : apparier du texte enchaîne un jour la queue

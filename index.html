@@ -128,7 +128,12 @@
         </div>
       </div>
 
-      <button class="button button--primary" type="submit" id="validate-button">Valider</button>
+      <!-- `type="button"`, et non "submit": chaque source d'entree a son
+           chemin. Le clic vient sur `click`, la touche retour sur `keydown`
+           dans ui.js. Un formulaire a bouton de soumission, lui, ferait
+           dependre la touche retour d'une soumission implicite dont iOS ne
+           garantit pas le second passage. Voir onKeydown(). -->
+      <button class="button button--primary" type="button" id="validate-button">Valider</button>
     </form>
 
     <p class="feedback" id="feedback" hidden aria-live="polite"></p>
