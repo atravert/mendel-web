@@ -25,7 +25,7 @@
      verifie par make verify. Sans lui, impossible de distinguer un appareil
      qui tourne encore l'ancien code d'un appareil ou le correctif echoue:
      les deux affichent exactement la meme chose. -->
-<meta name="app-version" content="8b780e3d">
+<meta name="app-version" content="2b24604f">
 
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -111,10 +111,36 @@
         maxlength="24"
         placeholder="">
 
-      <!-- Barre de symboles: uniquement quand la reponse attendue est une
-           formule d'ion, ou les indices, exposants, parentheses et chiffres
-           sont fastidieux a trouver sur un clavier de telephone. Tout est
-           insere au curseur, pas concatene a la fin.
+      <!-- La barre de symboles, deroulable.
+           Seule quand la reponse attendue est une formule d'ion, ou les
+           indices, exposants, parentheses et chiffres sont fastidieux a
+           trouver sur un clavier de telephone. 116 px: la rangee des signes
+           plus celle des chiffres, la marge et l'intervalle.
+
+           C'est la piece la plus lourde de l'ecran de quiz, et c'est ce que
+           l'appareil a refuse: 116 px pour 210 px visibles sur la serie ions,
+           soit plus de la moitie de la place restante. Le repli est donc
+           explicite -- repliee derriere UN bouton de 48 px -- plutot que
+           subi.
+
+           Le CSS ne peut pas decider: `@media (max-height: …)` porte sur le
+           viewport de MISE EN PAGE, et sur iOS il ne retrecit pas quand le
+           clavier se leve. La requete ne se declenche donc jamais, ni trop
+           tot ni trop tard. C'est l'appareil qui tranche, en mesurant, et c'est
+           `mesurerDebordement()` qui pose `data-compact`. Voir P6 dans le
+           README. -->
+      <button class="symbol-toggle" id="symbol-toggle" type="button"
+              aria-expanded="false" aria-controls="symbol-bar" hidden>Symboles</button>
+
+      <!-- Le contenu du repli. Tout est insere au curseur, pas concatene a la
+           fin.
+
+           `hidden` ne depend que de `refreshSymbolZone()`: ni le balisage ni le
+           CSS n'en decident seuls. Deux sources se disputeraient sinon la
+           meme propriete, et la plus recente gagnerait -- donc un `hidden`
+           pose par validate() serait annule par le premier rendu, ou
+           l'inverse, selon l'ordre. Un seul proprietaire, et deux regles
+           observables.
 
            Les deux premieres touches arment un mode plutot que d inserer un
            caractere: elles annoncent ce que la PROCHAINE frappe produira.

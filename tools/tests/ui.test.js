@@ -85,6 +85,32 @@ function currentPrompt() {
   return document.getElementById('prompt').textContent;
 }
 
+/**
+ * La question courante attend-elle une FORMULE? C'est la seule condition qui
+ * fait apparaitre la barre de symboles, et la seule qui pose le probleme de
+ * place mesure plus bas.
+ *
+ * La reponse se deduit de l'ENONCE, pas de la visibilite de la barre. C'etait
+ * la premiere version, et elle devenait fausse precisement dans le cas qu'elle
+ * sert a atteindre: en mode compact la barre est repliee meme sur une formule,
+ * donc le parcours ne s'arretait jamais et epuisait ses douze essais. Un
+ * detecteur d'etat de mise en page ne peut pas servir a reconnaitre une
+ * question.
+ */
+function isFormulaQuestion() {
+  return IONS.some((ion) => ion.name === currentPrompt());
+}
+
+function reachFormulaQuestion() {
+  for (let step = 0; step < 12; step += 1) {
+    if (isFormulaQuestion()) return true;
+    type(expectedAnswer(currentPrompt()) || 'zzz');
+    pressEnter();
+    document.getElementById('next-button').fire('click');
+  }
+  return isFormulaQuestion();
+}
+
 // ---------------------------------------------------------------------------
 // Ecran de depart
 // ---------------------------------------------------------------------------
@@ -255,17 +281,8 @@ check('serie d\'ions affichee', document.getElementById('progress-text').textCon
   'Question 1 / 10');
 
 {
-  // Chercher une question "formule attendue" (donc avec barre de symboles).
-  let found = null;
-  for (let step = 0; step < 10 && !found; step += 1) {
-    if (!document.getElementById('symbol-bar').hidden) found = step;
-    else {
-      type(expectedAnswer(currentPrompt()) || 'x');
-      pressEnter();
-      document.getElementById('next-button').fire('click');
-    }
-  }
-  ok('une question de formule est atteinte dans la serie', found !== null);
+  // Rejoindre une question dont la reponse est une formule.
+  ok('une question de formule est atteinte dans la serie', reachFormulaQuestion());
 
   check('barre de symboles visible pour une formule',
     document.getElementById('symbol-bar').hidden, false);
@@ -291,13 +308,7 @@ check('serie d\'ions affichee', document.getElementById('progress-text').textCon
 screen('start');
 startTopic('ions');
 {
-  // Atteindre une question de formule.
-  for (let step = 0; step < 10; step += 1) {
-    if (!document.getElementById('symbol-bar').hidden) break;
-    type(expectedAnswer(currentPrompt()) || 'x');
-    pressEnter();
-    document.getElementById('next-button').fire('click');
-  }
+  reachFormulaQuestion();
 }
 check('sur une formule, la barre est visible',
   document.getElementById('symbol-bar').hidden, false);
@@ -1177,5 +1188,347 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   quiz.clientHeight = 0;
   quiz.scrollHeight = 0;
   viewport.setKeyboard(844);
+  check('plus de mesure, plus de bandeau', note.hidden, true);
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// La mesure de l'appareil, et ce qu'elle a change
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//
+// P6. L'appareil a tranche, et son verdict n'etait pas celui qu'on attendait.
+//
+// Sur la serie ions, avec le clavier ouvert, dans un onglet Safari, il a
+// rapporte: 324 px de contenu pour 210 px visibles. Soit 114 px de defaut, sur
+// un ecran ou P1, P2 et P3 venaient d'etre appliques.
+//
+// Le premier chiffre se decompose EXACTEMENT, et chaque terme se lit dans
+// css/style.css: 22 + 1 + 20 + 53 + 48 + 116 + 64 = 324. Les 116 px sont la
+// barre de symboles, soit plus de la moitie de la place visible. Ce n'etait
+// donc pas un probleme de mise en page mais de CONTENU: rien ne pouvait faire
+// tenir 324 px dans 210 px sans rendre quelque chose.
+//
+// Deux corrections en decoulent, et aucune ne touche a ce qui se touche au
+// doigt:
+//
+//   - apres la reponse, la barre part. On ne compose plus rien, et c'est
+//     precisement quand le commentaire et Suivant ont besoin de la place;
+//   - avant la reponse, elle se replie derriere UN bouton, et le reste se
+//     resserre. Le repli est declenche par la MESURE, jamais par un seuil
+//     devine -- et une requete `@media (max-height)` ne peut pas le faire, car
+//     sur iOS le viewport de mise en page ne retrecit pas quand le clavier se
+//     leve. `make verify` refuse cette ecriture-la.
+//
+// Les hauteurs posees ici le sont A LA MAIN, comme partout ailleurs dans ce
+// fichier: personne ne les calcule. Le stub n'a pas de moteur de rendu, donc
+// poser `data-compact` ne reduit rien de mesurable -- un test qui simulerait
+// l'effet du CSS inventerait une hauteur, et repasserait sur un chiffre que
+// rien n'a mesure. C'est exactement le defaut que la fonction de mesure est
+// venue corriger. Les couples de nombres viennent donc du commentaire de
+// css/style.css, ou ils sont derives du CSS, et les assertions d'ici verifient
+// que l'APPLICATION REAGIT correctement a ces etats-la.
+{
+  const quiz = screen('quiz');
+  const note = document.getElementById('overflow-note');
+  const bar = document.getElementById('symbol-bar');
+  const toggle = document.getElementById('symbol-toggle');
+  const root = document.documentElement;
+  const viewport = window.visualViewport;
+  const form = document.getElementById('answer-form');
+
+  /** Les deux hauteurs que la feuille produit apres resserrement, posees a la
+   *  main. Les nombres viennent du commentaire de css/style.css: 226 px
+   *  disponibles une fois `--pad` ramene de 20 a 12, et 208 px de contenu une
+   *  fois `--gap` a 8, le type de question masque et la barre repliee. */
+  const pose = (dispo, contenu) => {
+    quiz.clientHeight = dispo;
+    quiz.scrollHeight = contenu;
+  };
+
+  /** Remeasure par le chemin reel: un changement de hauteur visible, donc
+   *  syncViewport(), donc mesurerDebordement(). Passer par un rendu verifierait
+   *  le mauvais moment -- la mesure doit suivre la hauteur, pas la question. */
+  const remesurer = (hauteur) => viewport.setKeyboard(hauteur);
+
+  // ---- D'abord ce que voit le harnais, sinon les assertions ne disent rien
+  //
+  // Le bouton est dans le formulaire, donc dans l'ecran de quiz. Le stub le
+  // modelait sans parent: une parade `pointerdown` ne l'atteindrait donc pas,
+  // et l'assertion qui suit verifierait la parade dans le vide -- c'est-a-dire
+  // ne la verifierait pas.
+  check('le harnais voit le bouton dans le formulaire', toggle._parent === form, true);
+  check('le harnais voit le formulaire dans l\'ecran de quiz',
+    form._parent === quiz, true);
+  check('le bouton des symboles bloque la prise de focus',
+    toggle.fire('pointerdown').defaultPrevented, true);
+  check('le bouton des symboles ne bloque pas le clic qui suit',
+    toggle.fire('click').defaultPrevented, false);
+
+  // ---- Reprise de l'etat mesure -------------------------------------------
+  //
+  // 210 px visibles: c'est le `clientHeight` de l'ecran de quiz, hors bandeau
+  // et hors zone d'action, sur un ecran ou la place reelle est deux fois moindre.
+  // C'est un iPhone dans un ONGLET: la barre d'adresse de Safari n'existe pas
+  // dans l'application installee. 210 px n'est donc pas un plancher, c'est le
+  // pire cas, et c'est celui-la qu'il faut faire tenir.
+  screen('start');
+  startTopic('ions');
+  ok('une question de formule pour la mesure', reachFormulaQuestion());
+
+  check('au depart, l\'ecran n\'est pas resserre',
+    root.getAttribute('data-compact'), undefined);
+  check('au depart, la barre est deployee', bar.hidden, false);
+  check('au depart, pas de bouton de repli', toggle.hidden, true);
+
+  // ---- Le declenchement par la mesure, et lui seul -------------------------
+  pose(210, 324);
+  remesurer(373);
+
+  check('un debordement mesure resserre l\'ecran',
+    root.getAttribute('data-compact'), '1');
+  check('la barre se replie derriere un bouton', bar.hidden, true);
+  check('le bouton de repli apparait', toggle.hidden, false);
+  check('le bouton annonce la barre comme repliee',
+    toggle.getAttribute('aria-expanded'), 'false');
+
+  // Et une fois resserre, ca tient: 208 px pour 226. Le bandeau se tait donc,
+  // et il ne doit le faire que si c'est vrai.
+  pose(226, 208);
+  remesurer(389);
+  check('une fois resserre, l\'ecran tient et le bandeau se tait', note.hidden, true);
+  // Le mode ne se desarme pas parce que ca tient: il est pose tant que la
+  // question n'a pas change, sinon l'icone du son remonterait de 8 px au
+  // moindre passage sous la limite.
+  check('le mode reste pose tant que la question ne change pas',
+    root.getAttribute('data-compact'), '1');
+
+  // ---- Le repli est une porte, pas un mur ---------------------------------
+  {
+    toggle.fire('click');
+    check('le joueur peut deployer la barre', bar.hidden, false);
+    check('le bouton annonce la barre deployee',
+      toggle.getAttribute('aria-expanded'), 'true');
+
+    // La barre reposee, ca repasse a 264 px de contenu pour 226. C'est un
+    // DEFAUT, et un defaut choisi par le joueur: il doit donc se dire. Le
+    // garder ouvert en silence laisserait un debordement muet, c'est-a-dire
+    // invisible.
+    pose(226, 264);
+    remesurer(389);
+    check('une barre deployee qui deborde est signalee', note.hidden, false);
+    check('le bandeau propose de la refermer',
+      note.textContent.indexOf('Refermez la barre de symboles') !== -1, true);
+    // Le message nomme l'etat mesure. Avant la reponse, il n'y a aucun
+    // "retour" a lire, et c'est ce que l'ancien texte promettait: il
+    // decrivait un autre ecran que celui qu'il mesurait.
+    check('le bandeau nomme l\'etat mesure',
+      note.textContent.indexOf('avant reponse') !== -1, true);
+    check('le bandeau ne promet pas un retour inexistant',
+      note.textContent.indexOf('lire le retour') === -1, true);
+    check('le bandeau ne promet pas non plus le texte d\'avant',
+      note.textContent.indexOf('Defilez pour lire le retour') === -1, true);
+
+    // Refermer doit etre possible: c'est le meme bouton, donc un clic de plus,
+    // et pas un retour a l'ecran d'accueil.
+    toggle.fire('click');
+    check('la barre se replie a nouveau', bar.hidden, true);
+    pose(226, 208);
+    remesurer(389);
+    check('une barre repliee ne deborde plus', note.hidden, true);
+  }
+
+  // ---- Le bouton remesure, sans qu'on le lui demande ----------------------
+  //
+  // Deployer la barre rend 68 px, et cette place peut ne pas suffire. Le
+  // bouton doit donc remesurer LUI-MEME: attendre la prochaine ouverture de
+  // clavier laisserait le debordement muet entre-temps -- c'est-a-dire
+  // invisible, ce qui est le pire des deux.
+  //
+  // Le test pose les hauteurs SANS declencher de mesure -- une simple
+  // affectation ne mesure rien -- puis clique. Sans la remesure du gestionnaire,
+  // le bandeau resterait muet et l'assertion echouerait. C'est donc bien le
+  // clic qui mesure, et non une coincidence de l'ordre des operations.
+  {
+    pose(226, 208);
+    remesurer(389);
+    check('au depart de ce bloc, tout tient', note.hidden, true);
+
+    quiz.scrollHeight = 264;          // barre deployee: 264 px, par make budget
+    toggle.fire('click');
+    check('le bandeau parle sans attendre une autre mesure', note.hidden, false);
+    check('et il parle de la place qui manque vraiment',
+      note.textContent.indexOf('38 px') !== -1, true);
+
+    // On referme. Le bandeau, lui, ne peut pas disparaitre: le stub conserve
+    // les hauteurs posees a la main, et 264 px pour 226 debordent toujours --
+    // alors que sur l'appareil la barre repliee rendrait ces 68 px.
+    //
+    // C'est la limite du harnais, et elle est dite plutot que contournee.
+    // Poser une hauteur qui "reconvient" ferait passer l'assertion en
+    // verifiant le stub et non le code -- c'est precisement la faute que ce
+    // fichier reproche a la premiere version de la mesure.
+    toggle.fire('click');
+    check('refermer redonne la barre repliee', bar.hidden, true);
+  }
+
+  // ---- Le bandeau ne se compte pas lui-meme -------------------------------
+  //
+  // Il est enfant de la coque, comme la zone d'action: il occupe donc de la
+  // place sur CELLE de `.screen`. Le code le masquait APRES avoir lu les
+  // hauteurs, donc toute relecture le comptait en deduction, et le defaut
+  // qu'il rapportait grossissait a chaque mesure. 114 px affirmes la ou il y
+  // en avait 44 -- et c'est peut-etre precisement le nombre que l'appareil a
+  // rapporté.
+  //
+  // Deux mesures successives, et le meme chiffre. Sans le masquage prealable,
+  // la seconde differait. Il suffirait de n'en faire qu'une pour que le defaut
+  // passe inapercu.
+  {
+    pose(280, 324);            // 210 reels, plus les 70 px du bandeau
+    remesurer(443);
+    const avant = note.textContent;
+    check('le bandeau s\'affiche sur un vrai debordement', note.hidden, false);
+    check('la place mesuree exclut le bandeau lui-meme',
+      note.textContent.indexOf('280 px') !== -1, true);
+
+    // La barre est REPLIEE ici, et il n'y a toujours pas de retour a lire. Le
+    // remede est donc le champ, pas le commentaire -- et c'est cette branche
+    // que rien n'affirmait avant: les deux autres etats etaient couverts, celui
+    // la laissait passer meme reduit au texte d'origine.
+    check('barre repliee et avant reponse, le bandeau renvoie au champ',
+      note.textContent.indexOf('Defilez pour atteindre le champ.') !== -1, true);
+    check('et il ne parle toujours pas de retour',
+      note.textContent.indexOf('lire le retour') === -1, true);
+
+    remesurer(443);
+    check('une remeasure ne dit pas autre chose', note.textContent === avant, true);
+    check('le defaut ne grossit pas a chaque lecture',
+      note.textContent.indexOf('44 px') !== -1, true);
+
+    // Et ce qui est annonce est bien la difference des deux chiffres annonces.
+    const manque = parseInt(note.textContent.match(/Il manque (\d+) px/)[1], 10);
+    const contenu = parseInt(note.textContent.match(/(\d+) px de contenu/)[1], 10);
+    const dispo = parseInt(note.textContent.match(/pour (\d+) px visibles/)[1], 10);
+    check('le manque annonce est la difference des deux chiffres',
+      manque, contenu - dispo);
+  }
+
+  // ---- Apres la reponse, la barre s'en va ---------------------------------
+  //
+  // 116 px rendues exactement la ou le commentaire et Suivant en ont besoin:
+  // 319 px de contenu pour un retour sur trois lignes, contre 210 visibles.
+  // On ne compose plus rien une fois la reponse comptee.
+  {
+    // La barre est deployee pour que sa disparition soit un effet de la
+    // reponse, et non un etat ou elle n'etait jamais sortie.
+    toggle.fire('click');
+    check('la barre est deployee avant de repondre', bar.hidden, false);
+    pose(210, 319);
+    remesurer(373);
+
+    type('SO4^2-');
+    pressEnter();
+    check('la reponse est comptee', document.getElementById('feedback').hidden, false);
+    check('la barre part avec la reponse', bar.hidden, true);
+    check('le bouton de repli part aussi', toggle.hidden, true);
+    check('le bouton n\'annonce plus une barre ouverte',
+      toggle.getAttribute('aria-expanded'), 'false');
+    check('le curseur n\'a pas quitte le champ a la validation',
+      document.activeElement === input, true);
+
+    // Et la, la place suffit: 179 px de contenu pour 226. C'est le chiffre qui
+    // rend le bouton Suivant et le commentaire visibles en meme temps que le
+    // clavier, sur un ecran qui ne les faisait pas tenir a 324.
+    pose(226, 179);
+    remesurer(389);
+    check('apres la reponse, le commentaire et Suivant tiennent a l\'ecran',
+      note.hidden, true);
+  }
+
+  // ---- Le mode ne survit pas a la question --------------------------------
+  //
+  // Chaque enonce a sa hauteur, et un ecran qui tient a la question 3 ne doit
+  // pas rester resserre parce que la 2 debordait. Le bouton son lit la MEME
+  // `var(--pad)` que la coque: un mode persistant le ferait monter et descendre
+  // de 8 px d'une question a l'autre, pour rien.
+  //
+  // Les hauteurs sont posees AVANT le changement de question, parce que
+  // renderQuestion() mesure a sa fin: le poser apres testerait un ecran qui
+  // deborde encore, et le mode se releverait aussitot -- ce qui est correct,
+  // et rendrait l'assertion muette.
+  pose(844, 400);
+  remesurer(844);
+  document.getElementById('next-button').fire('click');
+  check('le mode se repose a la question suivante',
+    root.getAttribute('data-compact'), undefined);
+  check('le bouton de repli s\'efface quand la barre n\'a pas a etre repliee',
+    toggle.hidden, true);
+
+  // Et il doit repartir des que la place manque de nouveau, sinon une serie
+  // commencee en mode compact resterait resserree pour rien.
+  pose(210, 324);
+  remesurer(373);
+  check('le mode revient des que ca deborde a nouveau',
+    root.getAttribute('data-compact'), '1');
+
+  // ---- Le choix du joueur, lui, survit a la question ---------------------
+  //
+  // 116 px, c'est court. Un joueur qui les veut doit avoir le champ, la
+  // formule et l'ecran -- et pas les redemander dix fois.
+  //
+  // Les hauteurs sont posees AVANT le parcours: chaque changement de question
+  // remet le mode a zero puis remesure, donc c'est la derniere question du
+  // parcours qui decide, et elle ne voit que ces hauteurs-la.
+  //
+  // Et la serie est neuve, parce que c'est la seule facon de remettre le choix
+  // du joueur a zero. Partir de l'etat laisse par les blocs precedents -- ou il
+  // avait demande la barre -- n'aurait pas ete une erreur du code, mais cela
+  // aurait teste autre chose: la persistance, pas le repli.
+  screen('start');
+  startTopic('ions');
+  pose(210, 324);
+  remesurer(373);
+  ok('une question de formule pour le choix du joueur', reachFormulaQuestion());
+  check('le mode repart des que la place manque',
+    root.getAttribute('data-compact'), '1');
+  check('la barre est de nouveau repliee', bar.hidden, true);
+  check('le bouton de repli est de la', toggle.hidden, false);
+  check('le bouton annonce une barre repliee',
+    toggle.getAttribute('aria-expanded'), 'false');
+
+  toggle.fire('click');
+  check('le joueur la deploye', bar.hidden, false);
+  check('le bouton annonce une barre deployee',
+    toggle.getAttribute('aria-expanded'), 'true');
+  type(expectedAnswer(currentPrompt()));
+  pressEnter();
+  document.getElementById('next-button').fire('click');
+  ok('une nouvelle formule pour verifier la reprise', reachFormulaQuestion());
+  check('le choix survit a la question suivante', bar.hidden, false);
+
+  // Mais une NOUVELLE serie, c'est une nouvelle session: le choix ne survit
+  // pas au changement de sujet.
+  screen('start');
+  startTopic('ions');
+  ok('une formule dans la nouvelle serie', reachFormulaQuestion());
+  check('le choix est remis a zero par une nouvelle serie', bar.hidden, true);
+
+  // ---- Et la barre n'a pas change de comportement -------------------------
+  //
+  // Elle est repliee, pas amputee: les touches existent, et un joueur qui la
+  // redeploie retrouve exactement les memes gestes. Le repli ne doit rien
+  // changer a l'insertion.
+  {
+    toggle.fire('click');
+    type('SO');
+    input.setSelectionRange(2, 2);
+    dom.key('2').fire('click');
+    check('l\'insertion marche apres un repli et un deploiement', input.value, 'SO2');
+  }
+
+  quiz.clientHeight = 0;
+  quiz.scrollHeight = 0;
+  remesurer(844);
   check('plus de mesure, plus de bandeau', note.hidden, true);
 }

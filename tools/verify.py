@@ -391,26 +391,36 @@ def check_keyboard_inset(errors):
     if not var:
         errors.append("style.css: .shell ne retombe pas sur env(safe-area-inset-bottom) "
                       "quand le clavier est ferme")
+        return count
+
+    # Seule la regle de `data-keyboard` a le droit de remettre --safe-bottom a
+    # zero, et elle DOIT le faire: c'est le contrat qui fait disparaitre les
+    # 34 px de l'indicateur d'accueil, que le clavier recouvre.
+    #
+    # Cette attribution est explicite, et elle a besoin de l'etre. La version
+    # precedente appliquait la verification a tout attribut que ui.js pose, en
+    # prenant la PREMIERE regle qui le mentionne. C'etait correct tant qu'il
+    # n'y avait qu'un attribut -- `data-keyboard` -- a la fois, puis a begun a
+    # catcher `data-compact`, dont la regle ne parle evidemment pas de
+    # l'indicateur d'accueil. Le defaut n'etait pas dans le CSS, qui est bon,
+    # mais dans un controle trop large: il jugeait chaque attribut sur une
+    # regle qui n'est pas la sienne. Un controle qui rejette du code correct
+    # apprend a etre ignore.
+    count += 1
+    if "data-keyboard" not in posers:
+        errors.append("js/ui.js: data-keyboard n'est pose par personne. La marge de "
+                      "l'indicateur d'accueil reste donc sous le clavier.")
+    elif "data-keyboard" not in lus:
+        errors.append("style.css: data-keyboard pose par ui.js, lu par aucune regle")
     else:
-        count += 1
-        # Sur chaque attribut que ui.js pose, on cherche la regle qui le
-        # consomme ET la valeur qu'elle donne. Un test par attribut, plutot
-        # qu'une comparaison a un nom ecrit en dur: un nom ecrit en dur peut
-        # deriver du vrai et sauter le test en silence, ce que la premiere
-        # version faisait exactement.
-        #
+        regle = re.search(r"\[data-keyboard[^\]]*\]\s*\{([^}]*)\}", css, re.S)
         # Et c'est la VALEUR qui compte, pas le nom: `--safe-bottom: 34px`
         # cite la variable, passe le test naif, et ne rend pas un pixel.
-        for attr in sorted(posers & lus):
-            regle = re.search(r"\[%s[^\]]*\]\s*\{([^}]*)\}" % re.escape(attr),
-                              css, re.S)
-            if not regle:
-                continue
-            if not re.search(r"%s:\s*0(?:px)?\s*;?" % re.escape(var.group(1)),
-                             regle.group(1)):
-                errors.append("style.css: la regle %s ne remet pas %s a zero: "
-                              "l'indicateur d'accueil garde 34 px sous le clavier"
-                              % (attr, var.group(1)))
+        if regle and not re.search(r"%s:\s*0(?:px)?\s*;?" % re.escape(var.group(1)),
+                                   regle.group(1)):
+            errors.append("style.css: la regle data-keyboard ne remet pas %s a zero: "
+                          "l'indicateur d'accueil garde 34 px sous le clavier"
+                          % var.group(1))
     return count
 
 
@@ -547,6 +557,166 @@ def check_sound_placement(errors):
             if "left: 50%" not in corps or "translateX(-50%)" not in corps:
                 errors.append("style.css: le centrage de l'icone son ne se centre "
                               "pas horizontalement (left: 50%% + translateX(-50%%))")
+    return count
+
+
+def check_compact_mode(errors):
+    """Le resserrement est decide par une MESURE, jamais par un seuil devine.
+
+    Deux verifications, et elles ne se ressemblent pas.
+
+    La premiere porte sur le declencheur. Un seuil de hauteur -- "si la zone
+    visible descend sous 460 px, resserre" -- serait un nombre invente, donc
+    faux sur tout appareil qui ne lui ressemble pas exactement. Pire, il ne
+    fonctionnerait pas du tout: sur iOS le viewport de MISE EN PAGE ne
+    retrecit pas quand le clavier se leve, donc une requete `@media
+    (max-height: ...)` y verrait toujours la hauteur de l'ecran et ne se
+    declencherait jamais. C'est exactement le piege de
+    `interactive-widget=resizes-content`, qui n'existe que sur Chrome, et qui a
+    deja fait perdre une version entiere de mise en page.
+
+    Le CSS ne peut donc rien decider, et c'est verifie ici: aucune requete de
+    hauteur ne doit subsister. `mesurerDebordement()` mesure, compare
+    `scrollHeight` a `clientHeight` sur la machine qui echoue, et pose
+    l'attribut. Un appareil qui a la place ne se resserre pas.
+
+    La seconde porte sur le contenu du mode: s'il ne reduisait rien, il serait
+    pose et sans effet -- la mise en page deborderait autant, et le bandeau
+    reparaitrait a l'identique. Les leviers sont donc relus un par un, sur la
+    regle qui les porte, et non sur une recherche dans tout le fichier: c'est
+    le mode qui doit les porter, sinon ils agiraient en permanence.
+    """
+    css = strip_comments(read("css/style.css"))
+    regles = parse_rules(css)
+    count = 0
+
+    # --- Le declencheur ne peut pas etre une requete de hauteur -------------
+    # `max-height` dans un @media porterait sur le viewport de mise en page.
+    #
+    # La CONDITION et le CORPS sont lus ensemble, et c'est la premiere version
+    # qui s'est trompee: elle capturait le groupe parenthesise, donc la
+    # condition elle-meme -- `(max-height: 460px)` -- lui echappait, et la
+    # feuille pouvait contenir exactement la requete interdite sans que rien ne
+    # la voie. C'etait un controle qui ne pouvait pas echouer, donc qui ne
+    # verifiait rien. Le motif ci-dessous englobe l'at-rule en entier.
+    for at_rule in re.findall(r"@media[^{]*\{[^{]*(?:\{[^{}]*\}[^{}]*)*\}", css, re.S):
+        if "max-height" in at_rule or "min-height" in at_rule:
+            errors.append("style.css: une requete de media sur la hauteur decide de "
+                          "la mise en page (%s). Sur iOS le viewport de mise en "
+                          "page ne retrecit pas quand le clavier se leve: la "
+                          "requete verrait la hauteur de l'ecran et ne se "
+                          "declencherait jamais. Utiliser data-compact, pose par "
+                          "mesurerDebordement()." % at_rule.split("{")[0].strip())
+        else:
+            count += 1
+
+    # --- L'attribut est pose par ui.js, et lu par une regle -----------------
+    src = strip_comments(read("js/ui.js"))
+    if "setAttribute('data-compact'" not in src:
+        errors.append("js/ui.js: data-compact n'est pose par personne. Le mode "
+                      "compact ne se declencherait jamais.")
+    else:
+        count += 1
+    if "removeAttribute('data-compact')" not in src:
+        errors.append("js/ui.js: data-compact n'est retire sur rien. Le mode "
+                      "compact surviverait a la question suivante et resserrerait un "
+                      "ecran qui tient deja.")
+    else:
+        count += 1
+
+    # --- Les leviers, lus dans LEUR regle ----------------------------------
+    # Un levier verifie dans tout le fichier peut venir d'une regle sans
+    # rapport: la regle de `data-answered` masque bien `.question-type`, et
+    # cela ne prouverait pas que le mode compact le fait aussi.
+    compact = None
+    for selecteur, corps in regles.items():
+        if "data-compact" in selecteur and "--gap" in corps:
+            compact = (selecteur, corps)
+            break
+    if compact is None:
+        errors.append("style.css: pas de regle html[data-compact] redéfinissant "
+                      "--gap. Le mode compact serait pose sans effet sur les "
+                      "intervalles, soit 32 px de moins qui ne tomberaient pas.")
+    else:
+        selecteur, corps = compact
+        count += 1
+        # La meme regle doit porter les deux variables. --gap resserre les
+        # intervalles de l'ecran; --pad reduit la marge de la coque, et donc
+        # rend de la place a .screen. Les deux lire par des regles differentes
+        # fonctionnerait aussi, mais la feuille le dirait moins bien.
+        if "--pad" not in corps:
+            errors.append("style.css: %s ne redefinit pas --pad. La marge de la "
+                          "coque garderait 40 px pour un ecran ou 24 suffisent."
+                          % selecteur)
+        else:
+            count += 1
+
+        # Et les valeurs doivent etre PLUS PETITES que celles de :root, pas
+        # simplement presentes. C'est le contrat: resserrer. Comparer les noms
+        # passerait avec `--gap: 16px`, qui est la valeur de :root et ne rend
+        # donc aucun pixel -- le mode serait pose, annonce, et sans effet.
+        def nombre(corps, nom):
+            trouve = re.search(r"%s:\s*(\d+)px" % re.escape(nom), corps)
+            return int(trouve.group(1)) if trouve else None
+
+        racine = regles.get(":root")
+        if racine is None:
+            errors.append("style.css: regle :root introuvable: impossible de "
+                          "verifier que le mode compact resserre vraiment")
+        else:
+            for variable in ("--gap", "--pad"):
+                avant = nombre(racine, variable)
+                apres = nombre(corps, variable)
+                if avant is None or apres is None:
+                    errors.append("style.css: %s sans valeur en px, soit dans :root "
+                                  "soit dans la regle du mode compact" % variable)
+                elif apres >= avant:
+                    errors.append("style.css: le mode compact redefinit %s a %d px "
+                                  "pour %d px a la base: il ne resserre rien."
+                                  % (variable, apres, avant))
+                else:
+                    count += 1
+
+    # Le type de question doit partir en compact: c'est une ligne qui ne dit
+    # rien de la reponse, et c'est elle que l'appareil a refuse en premier.
+    masque = regles.get("html[data-compact='1'] .question-type")
+    if masque is None:
+        masque = regles.get('html[data-compact="1"] .question-type')
+    if not masque or "none" not in masque:
+        errors.append("style.css: pas de regle masquant .question-type en mode "
+                      "compact. Ces 20 px et leur intervalle restent occupes alors "
+                      "que l'enonce tient sans.")
+    else:
+        count += 1
+
+    # --- Le repli doit exister, et etre un bouton --------------------------
+    # Sans lui, "resserre" se resumerait a reduire les marges: les 116 px de la
+    # barre de symboles, soit la piece la plus lourde, resteraient en place.
+    html = read("index.html")
+    bouton = re.search(r"<button[^>]*id=\"symbol-toggle\"[^>]*>", html, re.S)
+    if bouton is None:
+        errors.append("index.html: #symbol-toggle introuvable. Sans bouton, la barre "
+                      "de symboles ne peut pas se replier, et le mode compact ne "
+                      "gagnerait que 76 px sur 116.")
+    else:
+        count += 1
+        marque = bouton.group(0)
+        # `aria-controls` dit ce que le bouton commande, `aria-expanded` dit s'il
+        # est ouvert. Sans eux, le bouton n'est qu'un libelle qui n'explique rien
+        # a un lecteur d'ecran -- et c'est precisement le cas d'usage: un joueur
+        # qui a besoin de la barre est en train de la chercher.
+        for attribut in ("aria-controls=\"symbol-bar\"", "aria-expanded="):
+            if attribut not in marque:
+                errors.append("index.html: #symbol-toggle sans %s. Le bouton doit "
+                              "annoncer ce qu'il commande et s'il est deploye."
+                              % attribut)
+        if "aria-controls=\"symbol-bar\"" in marque:
+            count += 1
+        if "type=\"button\"" not in marque:
+            errors.append("index.html: #symbol-toggle sans type=\"button\". Un bouton "
+                          "de soumission implicite dans le formulaire ferait valider "
+                          "la reponse a la place du joueur.")
+
     return count
 
 
@@ -902,6 +1072,7 @@ def main():
     son = check_sound_placement(errors)
     worker = check_service_worker(errors)
     action = check_action_bar(errors)
+    compact = check_compact_mode(errors)
 
     print("precache service worker : %d entrees" % precache)
     print("references dans HTML    : %d" % html_refs)
@@ -918,6 +1089,7 @@ def main():
     print("placement du son      : %d" % son)
     print("lectures du service wk: %d" % worker)
     print("barre d'action et place: %d" % action)
+    print("mode compact, mesure  : %d" % compact)
 
     if errors:
         print()

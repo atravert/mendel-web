@@ -6,6 +6,8 @@
 #   make icons    regenere les icones PWA
 #   make audio    regenere le theme compresse (afconvert, livre avec macOS)
 #   make audio-levels  mesure le niveau de sortie du theme et des effets
+#   make budget   le budget vertical ecrit dans le CSS est-il encore vrai ?
+#   make mutations  casse le code exprès, exige que la verification le voie
 #   make online   le site publie sert-il la version locale ?
 #   make wait     idem, en repetant jusqu'a ce que le site suive
 #   make serve    sert le site sur http://localhost:8000
@@ -16,8 +18,9 @@ JSC := /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/js
 PROD_JS := js/data.js js/quiz.js js/audio.js js/ui.js sw.js
 TEST_JS := tools/tests/dom-stub.js tools/tests/quiz.test.js tools/tests/ui.test.js
 
-.PHONY: all check test verify syntax data icons audio audio-ladder \
-        audio-levels cache-version cache-check online wait serve clean
+.PHONY: all check test verify syntax budget mutations data icons audio \
+        audio-ladder audio-levels cache-version cache-check online wait \
+        serve clean
 
 all: check
 
@@ -29,7 +32,13 @@ all: check
 # Il echoue au lieu de corriger tout seul: une reecriture silencieuse
 # laisserait un arbre de travail sale, invisible en revue, et surtout ne
 # preloadrait pas le changement de version dans le commit qui le contient.
-check: syntax test verify cache-check
+#
+# `budget` est dans la liste, et c'est la seule verification de ce lot dont
+# l'objet est un NOMBRE ecrit dans un commentaire. Le tableau du budget
+# vertical decrit la feuille au pixel pres, et le defaut qu'il combat -- un
+# ecran qui refuse un calcul ecrit a la main -- ne peut pas revenir par la
+# porte du commentaire: `tools/budget.py` le recalcule et le compare.
+check: syntax test verify budget cache-check
 	@echo ""
 	@echo "Tout est vert."
 
@@ -62,6 +71,26 @@ verify:
 	@echo ""
 	@echo "== coherence des fichiers =="
 	@$(PYTHON) tools/verify.py
+
+# Le budget vertical du CSS, recalcule et compare au tableau ecrit en clair.
+# Le detail s'affiche avec `python3 tools/budget.py --table`.
+budget:
+	@echo ""
+	@echo "== budget vertical =="
+	@$(PYTHON) tools/budget.py
+
+# La suite est-elle capable de voir une casse? On casse 21 fois le code, une
+# mutation a la fois, et on exige que chacune soit vue -- soit par une
+# assertion, soit par un controle statique.
+#
+# Hors de `make check`, et c'est deliberé: chaque mutation lance une
+# verification complete, donc l'integrer transformerait le controle habituel en
+# quelques minutes. C'est une verification de la verification, pas du code;
+# elle se lance quand on a modifie ce qu'elle surveille, pas a chaque commit.
+mutations:
+	@echo ""
+	@echo "== mutations =="
+	@$(PYTHON) tools/mutations.py $(FILTRE)
 
 # js/data.js est genere: ne pas l'editer a la main.
 data:
