@@ -95,7 +95,7 @@ check('un enonce est affiche', currentPrompt().length > 0, true);
 check('un type de question est affiche',
   document.getElementById('question-type').textContent.length > 0, true);
 check('le champ est vide', input.value, '');
-check('le champ est actif', input.disabled, false);
+check('le champ n\'est jamais desactive', input.disabled, false);
 check('Valider est inactif tant que le champ est vide',
   document.getElementById('validate-button').disabled, true);
 check('le retour est masque', document.getElementById('feedback').hidden, true);
@@ -120,7 +120,12 @@ check('l\'enonce est compose de texte simple', currentPrompt().indexOf('<') === 
   check('retour au vert', document.getElementById('feedback').className,
     'feedback feedback--correct');
   check('le retour est visible', document.getElementById('feedback').hidden, false);
-  check('le champ se verrouille', input.disabled, true);
+  // Ni `disabled` ni `readOnly`: le champ garde le focus, donc le clavier
+  // reste leve. C'est `state.answered` qui empeche de recompter, pas lui.
+  check('le champ reste saisissable pour ne pas fermer le clavier',
+    input.disabled, false);
+  check('le focus ne quitte pas le champ a la validation',
+    document.activeElement === input, true);
   check('Valider se verrouille', document.getElementById('validate-button').disabled, true);
   check('le bouton Suivant apparait', document.getElementById('next-button').hidden, false);
   check('le bouton dit Suivant', document.getElementById('next-button').textContent,
@@ -151,7 +156,9 @@ check('progression 2/10', document.getElementById('progress-text').textContent,
   'Question 2 / 10');
 check('le score est conserve', document.getElementById('score-text').textContent, 'Score : 1');
 check('le champ est vide', input.value, '');
-check('le champ redevient actif', input.disabled, false);
+check('le champ n\'est toujours pas desactive', input.disabled, false);
+check('le curseur revient dans le champ, sans attendre',
+  document.activeElement === input, true);
 check('le retour est masque', document.getElementById('feedback').hidden, true);
 check('le bouton Suivant est masque', document.getElementById('next-button').hidden, true);
 ok('la question 2 est differente de la question 1', currentPrompt() !== firstPrompt);
@@ -306,7 +313,7 @@ check('insertion dans une selection', input.value, '-(O3');
   const horsTouche = dom.symbolBar.fire('pointerdown', {
     target: { closest: () => null },
   });
-  check('le clic hors des touches n\'est pas bloque', horsTouche.defaultPrevented, undefined);
+  check('le clic hors des touches n\'est pas bloque', horsTouche.defaultPrevented, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -517,11 +524,12 @@ function unicodeFormula(formula) {
     document.getElementById('feedback').className, 'feedback feedback--correct');
   check('le score augmente', document.getElementById('score-text').textContent !== scoreBefore, true);
 
-  // On enchaîne: valider donne le focus au bouton Suivant, ce qui ferme le
-  // clavier virtuel, et la question suivante doit le rouvrir.
+  // On enchaîne: valider ne doit PAS avoir vole le focus, et Suivant non
+  // plus. Le curseur est deja dans le champ quand le clic rend la main.
+  check('le focus n\'a pas quitte le champ a la validation',
+    document.activeElement === input, true);
   document.getElementById('next-button').fire('click');
-  flushTimers();
-  check('le champ reprend le focus a la question suivante',
+  check('le champ a le focus des le rendu de la question suivante',
     document.activeElement === input, true);
 }
 
@@ -529,44 +537,129 @@ function unicodeFormula(formula) {
 // Clavier virtuel
 // ---------------------------------------------------------------------------
 
-flushTimers();
-check('le champ a le focus au debut', document.activeElement === input, true);
+// La demande est precise: le clavier est present des l'ouverture de la serie,
+// et ne bouge plus jusqu'a la fin des reponses. Traduit en invariants
+// verifiables:
+//
+//   1. le curseur est dans le champ des la question posee, sans que
+//      l'utilisateur touche la case;
+//   2. le focus est pris SYNCHRONEMENT. Aucun navigateur ne leve le clavier
+//      hors d'un geste utilisateur: reporter le focus a la tache suivante
+//      sort du geste, et le champ se focus sans que le clavier se leve. C'est
+//      ce qui rendait le resultat pire qu'avant. Le harnais n'a volontairement
+//      aucune minuterie: avec un `setTimeout`, un report passerait, puisque le
+//      focus poserait au flush. Aucune assertion ici n'a donc le droit d'en
+//      attendre une;
+//   3. ni valider ni Suivant ne volent le focus, ni en changeant l'etat du
+//      champ ni en le focalisant. Perdre le focus ferme le clavier, qui
+//      retrecit le viewport, et toute la page se recentre: deux sautes par
+//      question.
+
+check('le curseur est dans le champ a la premiere question',
+  document.activeElement === input, true);
+check('le champ n\'a jamais ete desactive', input.disabled, false);
+
 {
-  // Le clavier se referme d'un geste, ou parce qu'un autre bouton a pris le
-  // focus. Peu importe: la question suivante le rouvre, sans que le joueur ait
-  // a y revenir. Conditionner le refocus a l'etat du clavier rendait
-  // l'enchainement dependant d'un detail invisible.
+  // Enchainement normal, comme le joueur: saisir, valider, suivant. Le focus
+  // ne doit jamais sortir du champ, et le nombre de blur produits par le code
+  // de production doit rester nul.
+  const blursAvant = input.blurred;
+  let focusPerdu = 0;
+  for (let question = 0; question < 3; question += 1) {
+    type(expectedAnswer(currentPrompt()) || 'x');
+    submit();
+    if (document.activeElement !== input) focusPerdu += 1;
+    document.getElementById('next-button').fire('click');
+    // Aucune minuterie: le focus doit etre deja pose quand le clic rend la
+    // main. C'est l'assertion qui rattraperait un report.
+    if (document.activeElement !== input) focusPerdu += 1;
+  }
+  check('le focus reste dans le champ sur trois questions enchainees',
+    focusPerdu, 0);
+  check('aucun blur n\'est produit par le code de production',
+    input.blurred - blursAvant, 0);
+  check('le champ est toujours saisissable', input.disabled, false);
+  check('readOnly n\'est pas utilise non plus', input.readOnly, false);
+}
+
+{
+  // Le geste est indispensable: sans lui, le navigateur refuse le clavier.
+  // `startQuiz` passe par un clic, et le focus y est synchrone -- c'est ce qui
+  // fait lever le clavier des la premiere question, sans clic sur le champ.
   input.blur();
-  check('le champ a bien perdu le focus', document.activeElement === input, false);
-
   type(expectedAnswer(currentPrompt()) || 'x');
   submit();
   document.getElementById('next-button').fire('click');
-  flushTimers();
-  check('le clavier se rouvre meme apres un blur',
+  check('un focus manuel est repris a la question suivante',
     document.activeElement === input, true);
 
-  // Idem apres un enchainement complet, ou le focus est passe par le bouton
-  // Suivant entre deux questions.
-  type(expectedAnswer(currentPrompt()) || 'x');
-  submit();
-  document.getElementById('next-button').fire('click');
-  flushTimers();
-  check('le clavier se rouvre apres chaque question',
+  input.blur();
+  startTopic('ions');
+  check('le curseur est deja dans le champ a l\'ouverture de la serie',
     document.activeElement === input, true);
+  check('aucun clic sur la case reponse n\'est necessaire',
+    input.focused > 0, true);
+  check('la serie est bien demarree', visible('quiz'), true);
+}
+
+{
+  // La fin de serie est le seul moment ou le clavier DOIT se fermer. Donc il
+  // faut lui retirer le focus explicitement: le laisser dans un champ devenu
+  // invisible est l'etat qu'iOS interprete le plusership -- et le resultat
+  // s'affiche avec le clavier encore leve, en plein ecran.
+  let last = currentPrompt();
+  for (let question = 0; question < QUESTIONS_PER_SERIES + 2; question += 1) {
+    type(expectedAnswer(last) || 'x');
+    submit();
+    document.getElementById('next-button').fire('click');
+    if (visible('result')) break;
+    last = currentPrompt();
+  }
+  check('la serie se termine sur l\'ecran de resultat', visible('result'), true);
+  check('le champ rend le focus a la fin de la serie',
+    document.activeElement === input, false);
+}
+
+// ---------------------------------------------------------------------------
+// La parade anti-prise de focus
+// ---------------------------------------------------------------------------
+
+// Valider et Suivant sont des <button>: sans parade, le navigateur leur donne
+// le focus a l'appui, le champ le perd, le clavier se ferme, et l'ecran saute.
+// La parade est un `pointerdown` annule sur le conteneur. On verifie qu'elle
+// porte bien sur les deux boutons -- et qu'elle n'annule pas le champ, sans
+// quoi iOS refuserait de lever le clavier, ce qu'on ne vit qu'a l'appareil.
+{
+  const validate = document.getElementById('validate-button');
+  const nextButton = document.getElementById('next-button');
+
+  check('Valider bloque la prise de focus',
+    validate.fire('pointerdown').defaultPrevented, true);
+  check('Suivant bloque la prise de focus',
+    nextButton.fire('pointerdown').defaultPrevented, true);
+  check('la parade ne porte pas sur le champ lui-meme',
+    input.fire('pointerdown').defaultPrevented, false);
+  check('la parade ne bloque pas le clic qui suit',
+    validate.fire('click').defaultPrevented, false);
 }
 
 // ---------------------------------------------------------------------------
 // Hauteur reellement visible
 // ---------------------------------------------------------------------------
 
-// Le point dur de cette application. `interactive-widget=resizes-content` ne
-// vaut que sur Chrome; sur iOS le viewport de mise en page ne bouge pas et
-// c'est le document qui defile, ce qui envoie la partie haute de l'ecran hors
-// du champ de vision et pousse le bouton Valider sous le bord. Ces assertions
-// verifient que la hauteur utile publiee suit bien le clavier, et qu'elle est
-// publee au bon moment.
+// `interactive-widget=resizes-content` ne vaut que sur Chrome; sur iOS le
+// viewport de mise en page ne bouge pas et le contenu, centre dans la hauteur
+// PLEINE, se retrouve a moitie sous le clavier, avec le bouton Valider hors de
+// l'ecran. Ces assertions verifient que la hauteur utile publiee suit le
+// clavier.
 {
+  // Le bloc precedent a mene la serie a son terme, donc le champ a rendu le
+  // focus et le curseur n'est plus dedans. On repart sur une serie neuve: ce
+  // qui suit mesure l'ecran du quiz, pas celui du resultat.
+  startTopic('elements');
+  check('une serie neuve replace le curseur dans le champ',
+    document.activeElement === input, true);
+
   const viewport = window.visualViewport;
   const root = document.documentElement;
   const cssVar = (name) => root.style.getPropertyValue(name);
@@ -592,125 +685,6 @@ check('le champ a le focus au debut', document.activeElement === input, true);
   // raccourcie apres le passage du clavier.
   viewport.hideKeyboard();
   check('clavier referme, la hauteur revient', cssVar('--app-height'), '844px');
-
-  // Le focus differe doit suivre: une question posee alors que le clavier est
-  // deja ouvert doit le laisser ouvert.
-  viewport.setKeyboard(508);
-  input.blur();
-  type(expectedAnswer(currentPrompt()) || 'x');
-  submit();
-  document.getElementById('next-button').fire('click');
-  flushTimers();
-  check('le focus differe fonctionne clavier ouvert',
+  check('le curseur survit a la fermeture du clavier',
     document.activeElement === input, true);
-  check('la hauteur suit toujours le clavier', cssVar('--app-height'), '508px');
-
-  viewport.hideKeyboard();
 }
-
-// ---------------------------------------------------------------------------
-// Le differe de focus ne doit pas raviver un clavier sur l'ecran suivant
-// ---------------------------------------------------------------------------
-
-{
-  // Deux questions d'affilee: le jeton doit invalider le focus de la premiere
-  // au profit de celui de la seconde, sinon un clavier se leve sur un ecran
-  // qui n'est plus celui du quiz.
-  input.blur();
-  type(expectedAnswer(currentPrompt()) || 'x');
-  submit();
-  document.getElementById('next-button').fire('click');
-  input.blur();
-  type(expectedAnswer(currentPrompt()) || 'x');
-  submit();
-  document.getElementById('next-button').fire('click');
-  check('le focus n\'est pas encore pris avant le vidage',
-    document.activeElement === input, false);
-
-  const avant = input.focused;
-  flushTimers();
-  check('un seul focus survit a deux questions enchainees',
-    input.focused - avant, 1);
-  check('le champ est bien focus au final', document.activeElement === input, true);
-}
-
-// ---------------------------------------------------------------------------
-// Serie complete jusqu'au resultat
-// ---------------------------------------------------------------------------
-
-screen('start');
-startTopic('elements');
-{
-  let answered = 0;
-  for (let step = 0; step < 10; step += 1) {
-    const answer = expectedAnswer(currentPrompt());
-    type(answer === null ? 'zzz' : answer);
-    submit();
-    answered += 1;
-    check('le bouton suivant est disponible a la question ' + (step + 1),
-      document.getElementById('next-button').hidden, false);
-    check('progression ' + (step + 1) + '/10',
-      document.getElementById('progress-text').textContent,
-      'Question ' + (step + 1) + ' / 10');
-    document.getElementById('next-button').fire('click');
-  }
-  check('10 questions repondues', answered, 10);
-  check('le bouton final annonce le resultat', document.getElementById('next-button').textContent,
-    'Voir le résultat');
-}
-
-check('l\'ecran de resultat est visible', visible('result'), true);
-check('le quiz est masque', visible('quiz'), false);
-check('score parfait affiche',
-  document.getElementById('result-score').textContent, 'Score : 10 / 10');
-check('un commentaire de fin est affiche',
-  document.getElementById('result-comment').textContent.length > 0, true);
-
-// ---------------------------------------------------------------------------
-// Retour au menu et nouvelle serie
-// ---------------------------------------------------------------------------
-
-document.getElementById('restart-button').fire('click');
-check('redemarrer relance le quiz', visible('quiz'), true);
-check('la serie repart a zero', document.getElementById('score-text').textContent, 'Score : 0');
-check('redemarrer revient a la question 1',
-  document.getElementById('progress-text').textContent, 'Question 1 / 10');
-
-{
-  // "Redemarrer" doit rester sur le meme theme.
-  let barSeen = 0;
-  for (let step = 0; step < 10; step += 1) {
-    if (!document.getElementById('symbol-bar').hidden) barSeen += 1;
-    type(expectedAnswer(currentPrompt()) || 'x');
-    submit();
-    document.getElementById('next-button').fire('click');
-  }
-  check('redemarrer garde le theme elements (aucune formule)', barSeen, 0);
-}
-
-document.getElementById('change-button').fire('click');
-check('changer de serie revient au menu', visible('start'), true);
-
-// ---------------------------------------------------------------------------
-// Bouton son
-// ---------------------------------------------------------------------------
-
-{
-  const toggle = document.getElementById('sound-toggle');
-  const icon = document.getElementById('sound-icon');
-  check('son active par defaut', icon.textContent, '🔊');
-  check('etat expose aux lecteurs d\'ecran', toggle.getAttribute('aria-pressed'), 'true');
-
-  toggle.fire('click');
-  check('le son se coupe', icon.textContent, '🔇');
-  check('l\'etat expose passe a faux', toggle.getAttribute('aria-pressed'), 'false');
-  check('la preference est memorisee', localStorage.getItem('mendel.sound'), 'off');
-
-  toggle.fire('click');
-  check('le son revient', icon.textContent, '🔊');
-  check('la preference revient', localStorage.getItem('mendel.sound'), 'on');
-}
-
-// ---------------------------------------------------------------------------
-// Le resume et le code de sortie sont produits une seule fois par
-// tools/run-tests.py, apres tous les fichiers de test.

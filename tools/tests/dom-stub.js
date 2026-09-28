@@ -24,6 +24,7 @@ function makeElement(tag, id, doc) {
     className: '',
     value: '',
     disabled: false,
+    readOnly: false,
     // Variables CSS posees par ui.js depuis visualViewport: le stub n'a pas de
     // moteur de rendu, mais il doit pouvoir les lire, sinon le code de
     // synchronisation serait teste en silence, donc jamais verifie.
@@ -41,6 +42,9 @@ function makeElement(tag, id, doc) {
     focused: 0,
     blurred: 0,
     _listeners: {},
+    // Ancetre pour la propagation de `fire()`. Renseigne uniquement la ou un
+    // conteneur recoit des evenements delegues.
+    _parent: null,
 
     /**
      * Comme dans un vrai DOM: poser textContent remplace tous les enfants par
@@ -77,16 +81,30 @@ function makeElement(tag, id, doc) {
       const at = list.indexOf(fn);
       if (at >= 0) list.splice(at, 1);
     },
-    /** Declenche les ecouteurs; retient le dernier evenement pour inspection. */
+    /**
+     * Declenche les ecouteurs de l'element PUIS ceux de ses ancetres.
+     *
+     * La propagation n'est pas un detail: le code de production enregistre
+     * ses gardes `pointerdown` sur le conteneur (l'ecran de quiz, la barre de
+     * symboles) et non sur chaque bouton. Sans remontee, ces ecouteurs ne
+     * seraient jamais appeles par un test, et la parade anti-prise de focus
+     * serait verifiee dans le vide -- c'est-a-dire pas verifiee.
+     */
     fire(type, event) {
       const payload = Object.assign({
         type,
         target: this,
+        defaultPrevented: false,
         preventDefault() { payload.defaultPrevented = true; },
-        stopPropagation() {},
+        stopPropagation() { payload.propagationStopped = true; },
       }, event || {});
       this.lastEvent = payload;
-      for (const fn of this._listeners[type] || []) fn(payload);
+
+      let node = this;
+      while (node && !payload.propagationStopped) {
+        for (const fn of node._listeners[type] || []) fn(payload);
+        node = node._parent;
+      }
       return payload;
     },
     focus() { this.focused += 1; doc.activeElement = this; },
@@ -179,11 +197,27 @@ function createDocument(html, topicIds) {
       .map((value) => makeKey({ insert: value }));
     doc._scriptKeys = ['sub', 'sup'].map((value) => makeKey({ script: value }));
 
+    for (const key of doc._insertKeys.concat(doc._scriptKeys)) key._parent = symbolBar;
+
     symbolBar.querySelectorAll = (selector) => {
       if (selector === '[data-insert]') return doc._insertKeys;
       if (selector === '[data-script]') return doc._scriptKeys;
       return [];
     };
+  }
+
+  // Les boutons de l'ecran de quiz sont enfants de l'ecran, qui porte le
+  // garde-fou `pointerdown` empechant le focus de quitter le champ.
+  const quizScreen = doc._elements['screen-quiz'];
+  if (quizScreen) {
+    for (const name of ['validate-button', 'next-button']) {
+      const button = doc._elements[name];
+      if (!button) continue;
+      button._parent = quizScreen;
+      // Comme les touches de la barre: un bouton se reconnait lui-meme a
+      // `closest()`, sinon la parade de ui.js ne le verrait jamais.
+      button.closest = (selector) => (selector === 'button' ? button : null);
+    }
   }
 
   // `documentElement` recoit les variables CSS de ui.js. Sans lui,

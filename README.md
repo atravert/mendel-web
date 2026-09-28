@@ -31,22 +31,32 @@ Trois contrôles, tous exécutables sans rien installer :
 | Commande | Ce qu'elle fait |
 |---|---|
 | `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. |
-| `make test` | 261 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
+| `make test` | 235 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
 | `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
 
 Le harnais a deux extensions qui méritent d'être connues, parce qu'elles
 rendent testable ce qui ne l'était pas :
 
-- **`setTimeout` et `flushTimers()`.** Jsc n'a pas de boucle d'événements. Le
-  focus reporté d'un tick — dont dépend l'ouverture du clavier sur iOS — était
-  donc injouable, et le test aurait dû contourner le code testé pour passer.
 - **`visualViewport` pilotable.** `setKeyboard`, `hideKeyboard` et `scrollTo`
   rejouent l'ouverture du clavier et le défilement du document. La hauteur et
   le décalage y sont **indépendants**, comme en réel : iOS peut lever le clavier
   sans faire défiler. Les relier l'un à l'autre — ce qu'un stub trop simple
   ferait — rendrait les deux variables redondantes, et une erreur de signe
   passerait.
+- **La propagation des événements.** `fire()` remonte le long des ancêtres.
+  Les parades anti-prise de focus sont enregistrées sur le conteneur et non
+  sur chaque bouton ; sans remontée elles ne seraient jamais appelées par un
+  test, et une parade vérifiée dans le vide n'est pas vérifiée.
+
+Et une absence, qui est une décision : **le harnais n'a aucune minuterie.**
+Jsc n'en fournit pas, et surtout on n'en simule pas. Un `setTimeout` dans
+`js/ui.js` poserait le focus à la prochaine tâche — hors du geste
+utilisateur, donc sans effet sur le clavier réel — et le test le verrait
+pourtant poser. C'est exactement le défaut que la
+[section clavier](#le-clavier-virtuel) combat ; une minuterie dans le harnais
+le rendrait invisible. Si une devient nécessaire, elle devra d'abord être
+prouvée par un test qui échoue sans elle.
 
 ## Régénérer
 
@@ -185,71 +195,93 @@ Deux réserves, mesurées et non corrigées :
 
 ## Le clavier virtuel
 
-« Le clavier reste toujours ouvert » est la demande qui a demandé le plus de
-travail, et la moins visible : rien à l'écran ne montre si elle est tenue. Les
-obstacles sont propres aux mobiles, aucun n'apparaît dans le code, et aucun ne
-se verrait sur un écran de bureau.
+La demande, en une phrase : **le clavier est présent dès l'ouverture de la
+série, et ne bouge plus jusqu'à la fin des réponses. Le curseur est dans le
+champ dès la question posée, sans que l'utilisateur touche la case.**
 
-**1. iOS n'ouvre pas le clavier sur un `focus()` synchrone.** Le champ est
-réactivé (`disabled = false`) puis focalisé dans la même tâche ; iOS considère
-qu'aucun geste utilisateur n'a demandé le clavier et ne le lève pas. Le champ
-est focusable, le curseur y va, et rien ne s'affiche. Le focus est donc reporté
-d'un tick — la seule parade connue à ce refus. Un jeton (`focusSequence`)
-invalide le report quand l'écran a changé entre-temps, pour ne pas lever un
-clavier sur une question qui n'est plus affichée.
+Un navigateur ne lève le clavier virtuel qu'en réponse à un geste
+utilisateur — c'est une règle de sécurité, pas une limite d'iOS. Toute la
+difficulté est là : il faut donc que chaque apparition du clavier soit
+consécutive à un vrai clic, et que rien ne l'interrompe ensuite.
 
-**2. `interactive-widget=resizes-content` ne vaut que sur Chrome.** Sur iOS, le
-viewport de mise en page **ne se rétrécit pas** quand le clavier monte. Le
-contenu, centré verticalement dans la hauteur *pleine* de l'écran, se retrouve
-donc à mi-hauteur du clavier, qui recouvre sa moitié basse : le bouton Valider
-sort de l'écran. `syncViewport()` publie `visualViewport.height` en
-`--app-height`, et `.shell` se dimensionne dessus. Un repli `100dvh` subsiste,
-pour le premier rendu, qui précède l'exécution du script.
+### Les quatre causes du clavier qui bouge
 
-**3. Le centrage rendait le débordement inatteignable.** Corriger la hauteur
-suffisait sur les grands écrans, et révélait un troisième problème, mesuré :
-le contenu fait **503 px** (marge et encoches 40 + 59 + 34, quatre intervalles
-de 16, progression 22, type 20, énoncé 53 sur une seule ligne, champ 48, barre
-104, marge 12, bouton 48). L'iPhone 15 laisse 508 px une fois le clavier
-ouvert : 4 px de marge, juste. Un iPhone SE n'en laisse que 407 — **96 px de
-débordement**.
+Elles sont toutes dans le chemin *valider → suivant*, et aucune ne se voyait
+sans téléphone.
 
-Or `.screen` centrait par `justify-content: center`, qui centre *aussi* un
-contenu trop grand : le haut sortait du cadre sans qu'aucun défilement n'y
-mène. Le centrage passe donc par des marges automatiques sur le premier et le
-dernier enfant, qui se réduisent à zéro dès que ça déborde, plus
-`overflow-y: auto`. Le contenu reste alors entierement atteignable.
+**1. Le focus était volé au champ.** `validate()` finissait par
+`nextButton.focus()`. Un bouton qui prend le focus vide le champ, le clavier
+se ferme, le viewport repasse de 508 à 844 px, et toute la page se recentre.
+Puis Suivant le rouvre, et l'écran saute une seconde fois : **deux sautes par
+question**. C'est « le clavier bouge », au sens propre.
 
-**Ce qu'on a délibérément refusé de faire.** Rattraper le défilement d'iOS
-(`visualViewport.offsetTop`, en `position: relative`) semblait le complément
-naturel de `--app-height`. C'était surtout dangereux, et le calcul le montre
-en deux cas :
+**2. Le champ était `disabled` après la validation.** Un élément `disabled`
+est infocalisable : le focus le quitte sur-le-champ, le clavier se ferme. Même
+symptôme, autre cause — et elle suffisait à elle seule. `readOnly` n'est pas
+un remède : il garde le focus mais fait disparaître le clavier sur iOS.
 
-- quand le contenu tient, le document est plus court que le viewport de mise
-  en page : il ne défile pas, `offsetTop` vaut 0, le décalage ne fait rien ;
-- quand il déborde, le défilement du document est le **seul** moyen
-  d'atteindre la fin — l'annuler la rendrait inatteignable, sans rien gagner
-  au passage.
+`state.answered` verrouille déjà la réponse, et `validate()` s'y arrête. Ni
+`disabled` ni `readOnly` n'ont donc leur place ici.
 
-Le décalage n'était donc utile que lorsqu'il ne pouvait rien, et nuisible
-lorsqu'il pouvait quelque chose. Un test verrouille ce refus, pour qu'on ne le
-réintroduise pas en croyant bien faire.
+**3. Le focus était reporté d'un tick.** C'est le correctif que j'avais
+ajouté au tours précédent, et il rendait les choses **pires**. Un
+`setTimeout(..., 0)` sort du geste utilisateur : le champ est bien focus, le
+curseur y entre, et le clavier ne se lève pas. Le report ne contourne pas la
+règle, il la viole en disparaissant.
 
-Les trois se vérifient sans téléphone. Le stub DOM expose un `visualViewport`
-pilotable (`setKeyboard`, `hideKeyboard`, `scrollTo`) et un `documentElement`
-qui enregistre les variables, et `js/ui.js` s'exécute réellement dans les tests
-— sinon le chemin le plus fragile de l'application resterait non testé, ce
-qu'est le risque classique d'un test qui s'exécute dans le vide.
+Le focus est donc **synchrone**, dans `renderQuestion()`. Chaque entrée dans
+cette fonction passe par un clic — le bouton de série, Suivant, ou Une
+nouvelle série — donc toujours par un geste. `startQuiz()` est entièrement
+synchrone, ce qui est la condition à ne pas casser.
 
-`make verify` couvre en outre ce que ces tests ne peuvent pas voir :
+**4. Les boutons de l'écran de quiz prenaient le focus.** Un `pointerdown`
+annulé sur le conteneur empêche le navigateur de transférer le focus, tout en
+laissant le clic avoir lieu. La parade existait déjà pour la barre de
+symboles ; elle a été étendue à Valider et Suivant.
 
-- les noms publiés par le JS et consommés par le CSS **se répondent**, et
-  gardent une valeur de repli. Ces noms n'existent que dans ces deux fichiers :
-  un renommage d'un seul côté laisserait la suite verte et la mise en page
-  cassée ;
-- `.screen` ne centre pas par `justify-content`, et garde ses marges
-  automatiques. Aucun test ne peut détecter la différence sur un contenu trop
-  grand, et c'est précisément le cas réel sur un petit écran.
+**Le seul `blur()` de l'application est en fin de série.** Partout ailleurs,
+le focus ne lâche pas. À la dernière question, en revanche, il doit lâcher :
+laisser le focus dans un champ devenu invisible est un état que le navigateur
+interprète mal, et le clavier resterait levé par-dessus l'écran de résultat.
+
+### Ce qui est vérifié, et comment
+
+Le harnais n'a **aucune minuterie**, délibérément. Avec un `setTimeout`, un
+report de focus passerait : le focus poserait toujours au vidage de la file.
+Aucune assertion n'a donc le droit d'en attendre une, et c'est ce qui
+attrape une régression de type 3.
+
+Le stub fait maintenant remonter les événements le long des ancêtres, parce
+que les parades sont enregistrées sur le conteneur et non sur chaque bouton.
+Sans propagation, elles ne seraient jamais appelées par un test — et une
+parade vérifiée dans le vide n'est pas vérifiée.
+
+| Invariant | Assertion |
+|---|---|
+| le curseur est dans le champ à la première question | `document.activeElement === input` |
+| le focus est pris **sans attendre** | aucune minuterie dans le harnais |
+| le focus ne sort jamais du champ, sur trois questions | compteur de sorties à 0 |
+| le code de production ne produit aucun `blur` | `input.blurred` inchangé |
+| ni `disabled` ni `readOnly` | les deux à `false` |
+| Valider et Suivant ne prennent pas le focus | `pointerdown` annulé, `click` non |
+| la parade ne porte pas sur le champ | sinon iOS refuserait le clavier |
+| la fin de série est la seule sortie du focus | `activeElement !== input` |
+
+Huit régressions ont été introduites puis vérifiées comme détectées : le focus
+volé par Suivant, le champ `disabled` après validation, le focus reporté d'une
+micro-tâche, la parade retirée, la parade restreinte à un seul bouton,
+`readOnly` réintroduit, le `blur()` de fin de série retiré, et le focus de
+`renderQuestion()` supprimé.
+
+### Ce qui reste à l'appareil
+
+Le simulateur garantit que le code **pose le focus dans le geste et ne le
+lâche pas**. Il ne peut pas garantir que le système d'exploitation lève le
+clavier sur un `focus()` synchrone — c'est le seul point que seule une
+vérification sur l'appareil peut trancher. Si le clavier ne se lève toujours
+pas à l'ouverture de la série, le prochain remède est de faire la première
+question au `touchend` plutôt qu'au `click`, qui est le geste que le
+navigateur reconnaît sans ambiguïté.
 ## Structure
 
 ```
@@ -349,17 +381,18 @@ Trois ajustements d'ergonomie, dans le même sens :
 - **Valider reste inactif tant que le champ est vide**, comme sur iOS. Sur
   Android, valider vide consommait un point.
 
-- **Plus de touche « clavier », et le clavier reste toujours ouvert.** Sa
-  fonction était de fermer le clavier virtuel pour accéder à la barre et au
-  bouton Valider, et d'empêcher qu'il se rouvre tout seul. iOS et Android
-  savent déjà le fermer d'un geste, et laisser le champ reprendre le focus à
-  chaque question est plus régulier : l'enchaînement ne dépend plus d'un
-  état qu'on ne voit pas, et le défilement ne saute plus d'une question à
-  l'autre.
+- **Plus de touche « clavier », et le clavier ne bouge plus.** Sa fonction était
+  de fermer le clavier virtuel pour accéder à la barre et au bouton Valider, et
+  d'empêcher qu'il se rouvre tout seul. iOS et Android savent le fermer d'un
+  geste.
 
-  Rester ouvert se heurte à deux obstacles propres aux mobiles, tous deux
-  traités, et tous deux vérifiables sans téléphone — voir
-  [Le clavier virtuel](#le-clavier-virtuel) plus bas.
+  Le curseur est dans le champ dès la question posée, sans que l'utilisateur
+  touche la case, et y reste jusqu'à la fin de la série. Ni `disabled` ni
+  `readOnly` ne sont utilisés, aucun bouton ne prend le focus, et le focus est
+  pris **dans le geste** plutôt que reporté — un report sort du geste et le
+  clavier ne se lève pas. Quatre défauts distincts
+  suffisaient à faire bouger le clavier ; ils sont détaillés dans
+  [Le clavier virtuel](#le-clavier-virtuel).
 
 Les formules sont affichées avec de vrais `<sub>`/`<sup>` plutôt qu'avec les
 caractères Unicode de `prettyFormula` : le texte reste sélectionnable et se

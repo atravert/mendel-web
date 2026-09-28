@@ -186,7 +186,6 @@ function renderQuestion() {
 
   el.input.value = '';
   el.input.placeholder = inputHint(question);
-  el.input.disabled = false;
   el.validateButton.disabled = true;   // rien a valider tant que le champ est vide
   el.feedback.hidden = true;
   el.feedback.textContent = '';
@@ -195,35 +194,23 @@ function renderQuestion() {
 
   el.symbolBar.hidden = !expectsFormula(question);
   setScript(null);
-  focusInput();
-}
 
-/**
- * Le champ doit reprendre le focus a chaque question pour que le clavier
- * virtuel reste ouvert. C'est differe d'un tick, et ce n'est pas un detail:
- *
- *   - sur iOS, un `focus()` synchrone appele dans la meme tache que le
- *     `disabled = false` qui vient de reactiver le champ n'ouvre pas le
- *     clavier. Le champ est focusable, mais iOS considere qu'aucun geste
- *     utilisateur n'a demande le clavier, donc il ne le leve pas. Passer a la
- *     tache suivante suffit a lever ce refus, et c'est le seul remede
- *     connu de ce symptome;
- *   - le differe laisse aussi le navigateur appliquer le nouveau texte et le
- *     placeholder avant de deplacer le curseur, sinon le scroll revient sur
- *     la position de la question precedente.
- *
- * `focusSequence` evite l'effet papillon: si l'ecran change avant le
- * callback -- validation puis retour immediat -- on ne ravive pas un clavier
- * sur une question qui n'est plus a l'ecran.
- */
-let focusSequence = 0;
-
-function focusInput() {
-  focusSequence += 1;
-  const mine = focusSequence;
-  setTimeout(() => {
-    if (mine === focusSequence) el.input.focus();
-  }, 0);
+  // Le curseur doit etre dans le champ des la question posee, sans que
+  // l'utilisateur ait a toucher la case. D'ou le focus ici, et pas plus tard.
+  //
+  // SYNCHRONE, et c'est le point delicat. Aucun navigateur ne leve le clavier
+  // virtuel en dehors d'un geste utilisateur -- c'est une regle de securite,
+  // pas une limite d'iOS. Reporter le focus a la tache suivante (ce qu'on
+  // faisait, avec un jeton `focusSequence` pour eviter un focus fantome) sort
+  // du geste: le champ est bien focus, le curseur y entre, et le clavier ne
+  // se leve pas. Le report rendait les choses PIRES, pas meilleures.
+  //
+  // Chaque entree dans renderQuestion() passe par un clic: le bouton de serie
+  // sur l'ecran d'accueil, Suivant, ou Une nouvelle serie. Tous sont des
+  // gestes, donc un focus synchrone y est toujours dans le geste. Il suffit
+  // donc de ne jamais passer par une promesse ni par une minuterie -- ce que
+  // startQuiz() ne fait pas.
+  el.input.focus();
 }
 
 function renderFeedback(correct) {
@@ -253,6 +240,13 @@ function renderResult() {
     finalComment(state.score, state.questions.length);
   el.resultScore.textContent = `Score : ${state.score} / ${state.questions.length}`;
   showScreen('result');
+
+  // Seul moment de la serie ou le clavier doit se fermer, donc il faut lui
+  // retirer le focus explicitement. Sans cela, il reste dans un champ devenu
+  // invisible -- un champ masque ne rend pas le focus, et le navigateur peut
+  // garder le clavier leve par-dessus l'ecran de resultat. C'est le seul
+  // blur() de l'application.
+  el.input.blur();
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +279,18 @@ function validate() {
   if (correct) state.score += 1;
 
   el.scoreText.textContent = `Score : ${state.score}`;
-  el.input.disabled = true;
+  // Ni `disabled` ni `readOnly` sur le champ, et c'est volontaire.
+  //
+  // `disabled` rend l'element infocalisable: le focus le quitte sur-le-champ,
+  // le clavier se ferme, et la hauteur visible change -- l'ecran saute. Une
+  // fois sur deux, ce n'est pas un detail d'apparence mais un tremblement.
+  // `readOnly` garde le focus mais fait disparaitre le clavier sur iOS: meme
+  // tremblement, autre cause.
+  //
+  // Le verrou n'a pas besoin d'eux. `state.answered` tient deja la reponse
+  // comptee, et `validate()` s'y arrete: retaper ne recompte rien. Le champ
+  // reste donc saisissable apres la reponse -- ce qui n'a rien de geneant,
+  // puisque Valider est deactive et que Suivant efface tout.
   el.validateButton.disabled = true;
 
   if (correct) sound.playCorrect();
@@ -296,7 +301,13 @@ function validate() {
   el.nextButton.textContent =
     state.index === state.questions.length - 1 ? 'Voir le résultat' : 'Question suivante';
   el.nextButton.hidden = false;
-  el.nextButton.focus();
+
+  // Surtout pas `nextButton.focus()`, qui fut la premiere version: deplacer le
+  // focus hors du champ ferme le clavier, donc retrecit le viewport, donc fait
+  // sauter l'ecran -- puis Suivant le rouvre, et l'ecran saute une seconde
+  // fois. Deux sautes par question, exactement ce que "le clavier ne bouge
+  // plus" exclut. Le focus reste dans le champ, et l'ecouteur `pointerdown`
+  // plus bas empeche meme le navigateur de le lui prendre.
 }
 
 function next() {
@@ -477,6 +488,20 @@ el.soundToggle.addEventListener('click', () => {
 // tactile et stylet, la ou `mousedown` manque sur les appareils tactiles.
 el.symbolBar.addEventListener('pointerdown', (event) => {
   if (event.target.closest('.key')) event.preventDefault();
+});
+
+// Meme parade pour TOUS les boutons de l'ecran de quiz, Valider et Suivant
+// compris. C'est ce qui rend le clavier immobile d'une question a l'autre:
+// un bouton qui prend le focus vide le champ, donc ferme le clavier, donc
+// retrecit le viewport de 508 a 844 px -- et toute la page se recentre. Deux
+// sautes par question.
+//
+// Annuler `pointerdown` n'empeche pas le clic: la frappe du bouton a toujours
+// lieu, seule la perte de focus est supprimee. Le `click` suit toujours le
+// `pointerdown`, donc la validation et l'enchainement ne dependent pas du
+// defilement du doigt, comme sur les deux natives.
+el.screens.quiz.addEventListener('pointerdown', (event) => {
+  if (event.target.closest('button')) event.preventDefault();
 });
 
 for (const key of el.symbolBar.querySelectorAll('[data-insert]')) {
