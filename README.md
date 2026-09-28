@@ -309,6 +309,60 @@ Le geste lui-même reste le plus répété de la série : la touche vaut Valider
 Suivant, poser le doigt. `state.answered` fait tout l'arbitrage, et fait
 aussi le garde-fou : le point gagné une fois ne peut pas être recompte.
 
+#### Et quand le clavier a volé le focus
+
+Un second mécanisme, distinct, capable de produire exactement le même
+symptôme : **le champ n'a plus le focus**.
+
+Un navigateur n'envoie `keydown` qu'à l'élément focus. Or iOS et Android
+retirent le focus du champ quand ils valident une correction ou un mot
+proposé : le clavier se ferme, et la touche retour n'atteint plus rien. Le
+joueur doit alors retaper dans le champ avant de pouvoir avancer. Rien dans
+l'application ne l'explique.
+
+D'où une seconde écoute, au niveau du `document`, qui récupère la touche
+retour même quand le champ ne l'a plus. Les deux chemins sont **exclusifs par
+construction**, par le test de focus — et c'est une condition de correction,
+pas une commodité :
+
+| Focus | Qui traite la touche |
+|---|---|
+| le champ | l'écoute du champ, ci-dessus — le cas normal |
+| pas le champ | l'écoute du `document` — le filet |
+| un bouton | le `click` du bouton, que le retour déclenche |
+| pas en série | personne : il n'y a rien à confirmer |
+
+Une double validation voit `onEnter()` valider **puis** avancer : la question
+est sautée et le score faux. L'exclusion par le focus est donc ce qui empêche
+ce défaut, et elle est vérifiée par le harnais comme tout le reste.
+
+Le harnais devait pour cela remonter les événements jusqu'au `document`, comme
+un vrai DOM. Il ne le faisait pas : la double validation était alors
+impossible à reproduire, et la garantie n'était pas vérifiée — seulement
+énoncée. Deux assertions'y veillent désormais, sinon le harnais pourrait
+redevenir infidèle en silence.
+
+### Le numéro de version, affiché à l'écran
+
+`version d83e6ffc` figure en bas de l'écran d'accueil et de l'écran de
+résultat.
+
+Il ne s'agit pas d'un décor. Les deux symptômes signalés sur l'appareil —
+l'icône du son à sa place par défaut, la touche retour qui n'avance pas —
+sont **exactement** ce que fait un appareil encore sur l'ancien code. Les
+distinguer d'un correctif inefficace demandait de le demander à l'utilisateur,
+qui ne pouvait pas le savoir.
+
+Le numéro vient de l'empreinte des vingt fichiers précachés, la même qui
+nomme le cache. Il est donc le numéro du cache que **cet** appareil sert, pas
+une étiquette : `make cache-version` écrit les deux depuis la même empreinte,
+et `make verify` échoue s'ils divergent.
+
+L'empreinte retire le `<meta>` avant de le hacher. Le hacher rendrait le
+calcul autoréférentiel — écrire une version change le fichier, donc change
+l'empreinte, donc la version suivante diffère encore — et `make cache-version`
+ne convergerait jamais.
+
 ### L'icône du son, centrée sur la ligne de progression
 
 L'icône se tient au centre de la ligne « Question X / 10 … Score : Y » pendant
@@ -324,11 +378,18 @@ règle de centrage. Les deux ne peuvent pas diverger. Un `11px` en dur aurait
 été la même chose, jusqu'au jour où la ligne aurait changé de hauteur et où
 l'icône aurait dérivé sans que personne ne le voie.
 
-Le centrage ne vise que l'écran de quiz, par `body:has(#screen-quiz:not([hidden]))`.
-La ligne de progression n'existe que là, et sur l'écran de résultat le contenu
-est centré et peut remonter haut, sous un commentaire rétro d'unequis. `:has()`
-demande Safari 15.4 ; en dessous, l'icône reste en haut à droite, c'est-à-dire
-la position précédente — la dégradation n'est pas une panne.
+Le centrage ne vise que l'écran de quiz, par `html[data-screen='quiz']`,
+attribut posé par `showScreen()`. La ligne de progression n'existe que là, et
+sur l'écran de résultat le contenu est centré et peut remonter haut, sous un
+commentaire rétro d'unequis.
+
+L'attribut remplace `body:has(#screen-quiz:not([hidden]))`. `:has()` paraît plus
+court, mais il demande Safari 15.4 : sur un appareil plus ancien, la règle ne
+s'applique pas du tout et l'icône reste **en haut à droite** — c'est-à-dire
+précisément le symptôme signalé. Un attribut est accepté partout, et surtout
+il se teste : le harnais peut affirmer que l'écran de quiz porte bien
+`data-screen="quiz"`, ce qu'aucun test ne peut faire pour `:has()`. `make
+verify` refuse donc `:has()` dans le CSS.
 
 **Le bouton son a aussi eu besoin de sa parade anti-prise de focus, pour une
 raison qui n'existait pas avant.** Il est `position: fixed`, donc enfant de
@@ -339,17 +400,20 @@ le son en pleine série déclenchait le tremblement qu'on venait de supprimer, e
 par la même cause.
 
 ### Ce qui est vérifié, et comment
-### Ce qui est vérifié, et comment
 
 Le harnais n'a **aucune minuterie**, délibérément. Avec un `setTimeout`, un
 report de focus passerait : le focus poserait toujours au vidage de la file.
 Aucune assertion n'a donc le droit d'en attendre une, et c'est ce qui
 attrape une régression de type 3.
 
-Le stub fait maintenant remonter les événements le long des ancêtres, parce
-que les parades sont enregistrées sur le conteneur et non sur chaque bouton.
+Le stub fait maintenant remonter les événements le long des ancêtres, jusqu'au
+`document`, parce que les parades sont enregistrées sur le conteneur et non sur
+chaque bouton — et parce que le filet de la touche retour écoute le `document`.
 Sans propagation, elles ne seraient jamais appelées par un test — et une
-parade vérifiée dans le vide n'est pas vérifiée.
+parade vérifiée dans le vide n'est pas vérifiée. C'est même arrivé : le lien
+de propagation et le test d'exclusion par le focus disparus **ensemble**,
+laissant 289 assertions au vert. Deux assertions vérifient désormais que le
+harnais voit bien ce que voit un navigateur.
 
 | Invariant | Assertion |
 |---|---|
@@ -372,23 +436,37 @@ parade vérifiée dans le vide n'est pas vérifiée.
 | le retour lève le mode indice/exposant armé | `aria-pressed` à `false` |
 | le bouton son bloque la prise de focus | `pointerdown` annulé, `click` non |
 | le bouton son ne coûte pas le focus au joueur | `activeElement === input` après |
+| la touche retour agit même sans focus | validation, puis passage au retour suivant |
+| le filet ne double pas l'effet | une pression, une question |
+| le filet laisse un bouton à son propre clic | ni validation ni annulation |
+| le filet est inerte hors série | `defaultPrevented` à `false` |
+| le harnais voit ce que voit le navigateur | propagation jusqu'au `document` |
+| l'écran courant est publié au démarrage | `data-screen="start"` |
+| le numéro affiché vient du `<meta>` réel | égalité avec `index.html` |
 | l'énoncé ne bouge pas quand la hauteur change | `.screen-quiz` sans marge auto |
 | la barre d'adresse n'est pas un clavier | `data-keyboard` absent à 790 px |
 | l'indicateur d'accueil s'écarte avec le clavier | `data-keyboard="open"` à 508 px |
 
-Vingt-deux régressions ont été introduites puis vérifiées comme détectées : le focus
-volé par Suivant, le champ `disabled` après validation, le focus reporté d'une
-micro-tâche, la parade retirée, la parade restreinte à un seul bouton,
+Trente-quatre régressions ont été introduites puis vérifiées comme détectées : le
+focus volé par Suivant, le champ `disabled` après validation, le focus reporté
+d'une micro-tâche, la parade retirée, la parade restreinte à un seul bouton,
 `readOnly` réintroduit, le `blur()` de fin de série retiré, le focus de
 `renderQuestion()` supprimé, la touche retour réduite à une validation, la
 touche retour avancée sans avoir validé, l'écran de quiz recentré,
 l'`auto` remonté sur le quiz, la marge d'accueil non remise à zéro,
 l'attribut renommé d'un seul côté, la variable non consommée, l'écran de
-résultat décentré, le retour à `justify-content: center`, la touche retour
-réduite à une validation, le gestionnaire `submit` redevenu actif, la parade
-du bouton son retirée, la ligne de progression détachée de `--progress-h`, le
-centrage appliqué à tous les écrans, et le centrage remplacé par une valeur
-mesurée à l'œil.
+résultat décentré, le retour à `justify-content: center`, le gestionnaire
+`submit` redevenu actif, la parade du bouton son retirée, la ligne de
+progression détachée de `--progress-h`, le centrage appliqué à tous les écrans,
+le centrage remplacé par une valeur mesurée à l'œil, le retour à
+`caches.match()`, le repli de navigation relisant tous les caches, le `<meta>`
+affichant une autre version, le `<meta>` supprimé, le worker ne répondant plus
+sur sa version, le retour à `:has()`, `data-screen` non publié, la version
+affichée disparue, `showScreen('start')` retiré du démarrage, le filet de
+sécurité supprimé, l'exclusion par le focus retirée, l'exclusion des boutons
+retirée, la garde hors série retirée, le champ ne remontant plus au document,
+l'écran de quiz ne remontant plus au document, et `doc.fire` sans
+`preventDefault`.
 
 Trois de ces contrôles ont eux-mêmes eu besoin d'être repris, parce qu'ils
 passaient au vert sur du CSS absent :
@@ -417,6 +495,11 @@ hauteur. Il ne peut pas garantir deux choses que seul un téléphone tranche :
   Sur un iPhone SE il n'y a que 407 px : le contenu déborde de 62 px et
   `.screen` défile. C'est le seul écran où l'invariant « rien ne bouge » se
   heurte à la taille de l'écran, pas au clavier.
+- que le système retire ou non le focus du champ quand il valide une
+  correction. Le filet de sécurité de la touche retour rend la question sans
+  importance, mais il ne peut pas être vérifié ici : aucun faux DOM ne simule
+  le clavier du système. Ce qui est vérifié, c'est que le filet agit quand le
+  focus est parti, et qu'il ne double jamais l'effet quand le focus est là.
 
 ## Structure
 
@@ -575,12 +658,39 @@ la dérive de l'empreinte SHA-256 des 20 fichiers précachés, et `make` échoue
 si elle n'est plus à jour.
 
 C'est une correction d'un bug réel, pas une commodité. Le service worker sert
-le cache en priorité, sans revalidation réseau : un fichier modifié sans que le
-nom du cache change reste servi **indéfiniment** sur l'appareil de l'utilisateur.
-Cela s'est déjà produit ici — un correctif d'affichage des commentaires avait
-été livré sans incrémentation de version, et il n'atteignait personne. Le
-symptôme est trompeur, parce que tout le reste fonctionne et que les tests
-passent.
+le cache en priorité : un fichier modifié sans que le nom du cache change
+restait servi **indéfiniment** sur l'appareil de l'utilisateur. Cela s'est
+déjà produit ici — un correctif d'affichage des commentaires avait été livré
+sans incrémentation de version, et il n'atteignait personne. Le symptôme est
+trompeur, parce que tout le reste fonctionne et que les tests passent.
+
+Un second bug aggravait le premier, et c'est le plus difficile à voir :
+`sw.js` lisait les réponses avec `caches.match(request)`, qui parcourt **tous**
+les caches de l'origine et pas seulement celui du service worker courant. Un
+cache périmé pouvait donc faire de l'ombre au cache vivant et servir l'ancien
+code, indéfiniment. Il ne fallait qu'une étape de cycle de vie manquée — et le
+résultat est *le même symptôme* : « j'ai corrigé, rien ne change », impossible
+à distinguer d'un correctif inefficace. Le worker ne lit donc plus que
+`caches.open(CACHE_NAME)`, repli de navigation compris, et `make verify` refuse
+toute lecture globale.
+
+Pas de revalidation en arrière-plan, et c'est délibéré : rafraichir le cache
+courant depuis le réseau mélangerait les déploiements — le `js/ui.js` de la
+v2 dans le cache de la v1, avec le `js/data.js` de la v1 — et l'application
+ne démarre pas. Le nom du cache, dérivé du contenu, *est* le mécanisme
+d'invalidation.
+
+### Vérifier sur l'appareil
+
+Un `push` n'a pas d'effet immédiat : le premier lancement sert l'ancien cache,
+la mise à jour s'installe pendant, et le nouveau code tourne à la deuxième
+ouverture. Sur une connexion lente, les 820 Ko de précache peuvent demander un
+troisième lancement. Il ne faut pas réinstaller l'application.
+
+Le numéro affiché en bas de l'écran d'accueil tranche immédiatement : il est
+écrit par le même outil que `CACHE_VERSION` et vérifié par `make verify`. S'il
+ne change pas après un déploiement, l'appareil sert encore l'ancien code, et le
+symptôme observé n'a rien à voir avec le correctif que l'on croit tester.
 
 Le seul piège qui subsiste est de modifier un fichier précaché et de pousser
 sans avoir lancé `make`. Le garde-fou est là pour le transformer en échec rouge

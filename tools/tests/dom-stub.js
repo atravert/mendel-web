@@ -138,14 +138,29 @@ function createDocument(html, topicIds) {
       const at = list.indexOf(fn);
       if (at >= 0) list.splice(at, 1);
     },
+    // Meme construction de charge utile que pour un element: `preventDefault`
+    // et `stopPropagation` doivent exister, sinon un ecouteur pose sur le
+    // document qui les appelle echouerait dans le harnais et passerait sur
+    // l'appareil -- ou l'inverse, et le second cas est le piege.
     fire(type, event) {
-      for (const fn of doc._listeners[type] || []) {
-        fn(Object.assign({ type }, event || {}));
-      }
+      const payload = Object.assign({
+        type,
+        target: doc,
+        defaultPrevented: false,
+        preventDefault() { payload.defaultPrevented = true; },
+        stopPropagation() { payload.propagationStopped = true; },
+      }, event || {});
+      doc.lastEvent = payload;
+      for (const fn of doc._listeners[type] || []) fn(payload);
+      return payload;
     },
     getElementById(id) {
       if (!doc._elements[id]) doc._elements[id] = makeElement('div', id, doc);
       return doc._elements[id];
+    },
+    querySelector(selector) {
+      if (selector === 'meta[name="app-version"]') return doc._metaVersion;
+      return null;
     },
     querySelectorAll(selector) {
       if (selector === '[data-topic]') {
@@ -177,6 +192,14 @@ function createDocument(html, topicIds) {
     doc._elements[id] = node;
   }
   doc._declaredIds = (html.match(/id="([^"]+)"/g) || []).map((m) => m.slice(4, -1));
+
+  // Le `<meta name="app-version">` est lu DANS le vrai index.html, comme le
+  // reste du balisage. Le test verifie donc le numero reellement publie, pas
+  // une constante de la Stub -- et si la metaque oubliee, le test le voit.
+  const appVersion = (html.match(/<meta name="app-version" content="([^"]*)"/) || [])[1];
+  const metaVersion = makeElement('meta', '', doc);
+  metaVersion.content = appVersion === undefined ? '' : appVersion;
+  doc._metaVersion = metaVersion;
 
   // La barre de symboles doit repondre a querySelectorAll('[data-insert]')
   // et querySelectorAll('[data-script]') *avant* que le code de production ne
@@ -219,7 +242,25 @@ function createDocument(html, topicIds) {
       // `closest()`, sinon la parade de ui.js ne le verrait jamais.
       button.closest = (selector) => (selector === 'button' ? button : null);
     }
+    // L'ecran de quiz remonte jusqu'au document, comme dans un vrai DOM. Sans
+    // ce lien, un `keydown` pose sur un bouton n'atteindrait pas une ecoute
+    // posee sur le document -- et le garde-fou qui laisse un bouton focus a son
+    // propre clic ne serait jamais exerce.
+    quizScreen._parent = doc;
   }
+
+  // Le champ de reponse remonte jusqu'au document.
+  //
+  // Dans un vrai DOM, un `keydown` sur le champ remonte aussi jusqu'a
+  // `document`. Sans ce lien, une ecoute posee sur le document -- le filet de
+  // securite quand le clavier a vole le focus -- ne serait jamais exercee par
+  // les tests, et le harnais validerait une mechanique qui n'a jamais tourne.
+  //
+  // Rendre la propagation fidele a aussi un effet utile: les deux chemins
+  // d'ecoute de la touche retour se declenchent alors sur la MEME pression,
+  // exactement comme sur l'appareil. Leur exclusion mutuelle devient donc
+  // verifiable, au lieu d'etre une clause de style.
+  if (doc._elements['answer-input']) doc._elements['answer-input']._parent = doc;
 
   // `documentElement` recoit les variables CSS de ui.js. Sans lui,
   // syncViewport() echouerait et le chemin le plus fragile de l'application

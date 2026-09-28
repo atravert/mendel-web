@@ -89,6 +89,13 @@ function currentPrompt() {
 // Ecran de depart
 // ---------------------------------------------------------------------------
 
+// Verifie ICI, et non plus bas: `data-screen` ne vaut `start` qu'avant la
+// premiere navigation. Apres, le fichier a deja parcouru des series, et
+// l'assertion testerait l'ecran courant plutot que le demarrage. Retirer
+// cette assertion ne ferait echouer aucun autre test.
+check('l\'ecran courant est publie des le chargement',
+  document.documentElement.dataset.screen, 'start');
+
 check('l\'ecran de depart est visible au chargement', visible('start'), true);
 check('le quiz est masque au chargement', visible('quiz'), false);
 check('le resultat est masque au chargement', visible('result'), false);
@@ -751,6 +758,166 @@ check('le champ n\'a jamais ete desactive', input.disabled, false);
   pressEnter();
   check('le retour leve le mode arme',
     cleExposant.getAttribute('aria-pressed'), 'false');
+}
+
+// ---------------------------------------------------------------------------
+// La touche retour quand le clavier a vole le focus
+// ---------------------------------------------------------------------------
+
+// Le cas de terrain qui manquait.
+//
+// Les deux symptomes signales -- l'icone du son mal placee, et la touche
+// retour qui n'avance pas -- sont exactement ce que fait un appareil encore
+// sur l'ancien code. On ne pouvait pas le distinguer d'un correctif
+// inefficace. Le numero de version affiche tranche maintenant, et le service
+// worker ne lit plus que son propre cache.
+//
+// Reste un mecanisme reel, distinct, et capable de produire le meme
+// symptome: iOS et Android retirent le focus du champ quand ils valident une
+// correction ou un mot propose. Le champ n'a alors plus le focus, donc plus
+// de `keydown`, donc la touche retour ne fait plus rien -- jusqu'a ce que le
+// joueur tape a nouveau dans le champ.
+{
+  // ---- D'abord: le harnais doit voir ce que voit un vrai navigateur ----
+  //
+  // Un `keydown` sur le champ remonte jusqu'au document. Si le faux DOM ne
+  // remonte pas l'evenement, la double validation -- compter ET avancer d'un
+  // coup, donc sauter une question -- devient IMPOSSIBLE a reproduire dans
+  // les tests, et l'exclusion mutuelle par le focus cesse d'etre verifiee. Le
+  // harnais validerait alors une garantie qu'il ne controle pas.
+  //
+  // C'est deja arrive: le lien de propagation et le test de focus etaient
+  // supposes se surveiller mutuellement, et les deux disparus ensemble
+  // laissaient 289 assertions au vert.
+  let vuParLeDocument = 0;
+  const temoin = () => { vuParLeDocument += 1; };
+  document.addEventListener('keydown', temoin);
+
+  input.fire('keydown', { key: 'x' });
+  check('le faux DOM fait remonter le keydown du champ jusqu\'au document',
+    vuParLeDocument, 1);
+
+  vuParLeDocument = 0;
+  document.getElementById('validate-button').fire('keydown', { key: 'x' });
+  check('le faux DOM fait remonter le keydown d\'un bouton jusqu\'au document',
+    vuParLeDocument, 1);
+
+  document.removeEventListener('keydown', temoin);
+
+  // ---- Puis: le filet de securite, qui ne sert que si le focus a disparu -
+  startTopic('elements');
+
+  // Une reponse comptee, puis le champ perd le focus, comme le ferait la
+  // validation d'une correction par le clavier du systeme.
+  type(expectedAnswer(currentPrompt()));
+  pressEnter();
+  const promptAvant = currentPrompt();
+  input.blur();
+  check('le champ a bien perdu le focus', document.activeElement, null);
+
+  // La touche retour, portee ailleurs que par le champ.
+  const evt = document.fire('keydown', { key: 'Enter' });
+  check('la touche retour avance malgre la perte de focus',
+    currentPrompt() !== promptAvant, true);
+  check('le focus revient dans le champ pour la question suivante',
+    document.activeElement === input, true);
+  check('l\'evenement est annule', evt.defaultPrevented, true);
+
+  // Meme chose sans reponse comptee: c'est un retour qui VALIDE, dans les
+  // memes conditions. Sans cela, le filet ne fonctionnerait qu'apres une
+  // reponse, donc pas pour l'usage le plus courant.
+  startTopic('elements');
+  const promptAValider = currentPrompt();
+  type(expectedAnswer(promptAValider));
+  input.blur();
+  const evtValider = document.fire('keydown', { key: 'Enter' });
+  check('le retour valide malgre la perte de focus',
+    document.getElementById('feedback').hidden, false);
+  check('une seule question consommee',
+    document.getElementById('progress-text').textContent, 'Question 1 / 10');
+  check('la question courante n\'a pas change', currentPrompt(), promptAValider);
+  check('l\'evenement de validation est annule', evtValider.defaultPrevented, true);
+
+  // Le filet ne doit pas valider quand il n'y a rien a valider.
+  startTopic('elements');
+  const promptVide = currentPrompt();
+  input.blur();
+  document.fire('keydown', { key: 'Enter' });
+  check('un retour a vide ne fait rien, focus ou non',
+    currentPrompt(), promptVide);
+
+  // Hors serie, la touche retour n'a rien a confirmer.
+  document.getElementById('change-button').fire('click');
+  const evtHorsSerie = document.fire('keydown', { key: 'Enter' });
+  check('la touche retour est ignoree hors serie',
+    evtHorsSerie.defaultPrevented, false);
+  check('le retour a l\'accueil tient', visible('start'), true);
+
+  // Un bouton a le focus est active par le retour: son propre `click` agit
+  // deja. Le doubler validerait ET avancerait d'un coup.
+  startTopic('elements');
+  type(expectedAnswer(currentPrompt()));
+  const boutonValider = document.getElementById('validate-button');
+  document.activeElement = boutonValider;
+  const promptBoutonFocus = currentPrompt();
+  // Le evenement part du BOUTON: c'est sa cible qui declenche le garde-fou.
+  // Lance sur le document, la cible serait le document, et le test passerait
+  // sans rien verifier du tout.
+  const evtBouton = boutonValider.fire('keydown', { key: 'Enter' });
+  check('la touche retour laisse un bouton focus a son propre clic',
+    currentPrompt(), promptBoutonFocus);
+  check('le bouton focus n\'est pas confirme par le filet',
+    document.getElementById('feedback').hidden, true);
+  check('l\'evenement n\'est pas annule au passage du bouton',
+    evtBouton.defaultPrevented, false);
+}
+
+// ---------------------------------------------------------------------------
+// L'ecran courant, et le numero de version affiche
+// ---------------------------------------------------------------------------
+
+// Deux choses que je ne peux pas verifier autrement.
+//
+// `data-screen` sur `<html>`: c'est ce qui permet au CSS de centrer l'icone du
+// son sur l'ecran de quiz. Il remplace `:has()`, qui n'existe pas avant Safari
+// 15.4 -- et qui, sur un appareil plus ancien, laissait l'icone a sa position
+// par defaut, c'est-a-dire le symptome signale. Un attribut se teste.
+//
+// Le numero de version: sans lui, un appareil qui tourne encore l'ancien code
+// et un appareil sur lequel le correctif echoue affichent exactement la meme
+// chose. Le depannage tourne alors en rond, et c'est ce qui est arrive.
+{
+  const racine = document.documentElement;
+  const versionAffichee = document.getElementById('version-start');
+  const versionResultat = document.getElementById('version-result');
+
+  check('le numero de version est affiche sur l\'ecran d\'accueil',
+    /^version [0-9a-f]{8}$/.test(versionAffichee.textContent), true);
+  check('le numero de version est affiche sur l\'ecran de resultat',
+    /^version [0-9a-f]{8}$/.test(versionResultat.textContent), true);
+  check('les deux ecrans affichent le meme numero',
+    versionAffichee.textContent === versionResultat.textContent, true);
+
+  // Le numero vient du `<meta>` du vrai index.html, pas d'une constante.
+  const metaVersion = document.querySelector('meta[name="app-version"]').content;
+  check('le numero affiche vient du meta du vrai index.html',
+    versionAffichee.textContent, 'version ' + metaVersion);
+  check('le meta porte bien une empreinte',
+    /^[0-9a-f]{8}$/.test(metaVersion), true);
+
+  // Le demarrage est verifie dans la section d'accueil, ou aucun test n'a
+  // encore navigue. Ici, on verifie que la publication suit l'ecran.
+  startTopic('elements');
+  check('l\'ecran de quiz est publie', racine.dataset.screen, 'quiz');
+
+  // C'est ce que lit le CSS pour centrer l'icone du son. Si `data-screen`
+  // suivait l'ecran avec un retard, l'icone resterait a sa position par
+  // defaut pendant une question -- et ce serait le symptome signale.
+  check('le centrage de l\'icone s\'applique sur l\'ecran de quiz',
+    racine.dataset.screen === 'quiz', true);
+
+  document.getElementById('change-button').fire('click');
+  check('le retour a l\'accueil est publie', racine.dataset.screen, 'start');
 }
 
 // ---------------------------------------------------------------------------

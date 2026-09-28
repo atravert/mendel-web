@@ -135,6 +135,8 @@ const el = {
   installArea: document.getElementById('install-area'),
   installButton: document.getElementById('install-button'),
   installHint: document.getElementById('install-hint'),
+  versionStart: document.getElementById('version-start'),
+  versionResult: document.getElementById('version-result'),
 };
 
 // Les touches d'indice et d'exposant sont listees a part des touches
@@ -149,6 +151,10 @@ function showScreen(name) {
   for (const [key, node] of Object.entries(el.screens)) {
     node.hidden = key !== name;
   }
+  // L'ecran courant, publie sur `<html>`. Sans lui, la seule facon de
+  // demander "suis-je sur l'ecran de quiz?" en CSS est `:has()`, qui demande
+  // Safari 15.4. Un attribut, lui, marche partout -- et il se teste.
+  document.documentElement.dataset.screen = name;
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +560,17 @@ el.nextButton.addEventListener('click', next);
 el.restartButton.addEventListener('click', () => startQuiz(state.topic));
 el.changeButton.addEventListener('click', () => showScreen('start'));
 
+// Le numero de version, sur l'ecran d'accueil et sur celui du resultat: les
+// deux moments ou l'on regarde l'ecran sans etre en plein dans une serie.
+//
+// Il vient du `<meta name="app-version">`, ecrit par le meme outil que
+// CACHE_VERSION, et verifie egalement par `make`. C'est donc le numero du
+// cache que CET appareil sert reellement, pas une etiquette.
+for (const node of [el.versionStart, el.versionResult]) {
+  const version = document.querySelector('meta[name="app-version"]');
+  node.textContent = version ? `version ${version.content}` : 'version inconnue';
+}
+
 el.soundToggle.addEventListener('click', () => {
   sound.toggle();
   updateSoundButton();
@@ -606,6 +623,44 @@ for (const key of scriptKeys) {
 el.input.addEventListener('input', refreshValidateButton);
 el.input.addEventListener('keydown', onKeydown);
 
+// Filet de securite pour la touche retour, et lui SEULEMENT.
+//
+// Ecoute principale: `keydown` sur le champ, ci-dessus. Elle suppose que le
+// champ a le focus, parce qu'un navigateur n'envoie `keydown` qu'a l'element
+// focus. Or le champ perd le focus sans qu'on l'ait voulu: iOS ferme la barre
+// de suggestions quand une correction est validee et retire le focus, Android
+// fait de meme quand il valide un mot propose. Le clavier se ferme, la
+// touche retour n'atteint plus rien, et la question avance de deux pressions
+// sur deux -- sans que rien dans l'application explique pourquoi.
+//
+// D'ou cette seconde ecoute, au niveau du document, qui recupere la touche
+// retour meme quand le champ ne l'a plus.
+//
+// Elle ne peut pas declencher deux fois, et c'est la seule chose qui compte
+// ici. Une double validation voit `onEnter()` valider PUIS avancer d'un coup:
+// la question est sautee, silencieusement, et le score du joueur est faux. Les
+// deux chemins sont donc exclusifs par construction, et non par convention:
+//
+//   - le champ a le focus  -> l'ecoute de ci-dessus a deja traite, on ne
+//     touche a rien (c'est le cas normal, le seul teste);
+//   - le champ n'a pas le focus -> c'est ici que la touche etait perdue.
+//
+// Le test de focus est donc une condition de correction, pas une commodite:
+// c'est lui qui empeche de sauter une question.
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  // Le champ a le focus: la premiere ecoute s'en est chargee.
+  if (document.activeElement === el.input) return;
+  // Un bouton a le focus est active par le retour: son propre `click` fait
+  // le travail, et le reproduire ici le ferait deux fois.
+  if (event.target && event.target.closest && event.target.closest('button')) return;
+  // Pas en serie: la touche retour n'a rien a confirmer.
+  if (el.screens.quiz.hidden) return;
+  event.preventDefault();
+  setScript(null);
+  onEnter();
+});
+
 // Le navigateur n'autorise une lecture audio qu'a partir d'un geste
 // utilisateur. On ouvre le contexte des le premier appui, puis on retente
 // la musique a chaque appui tant qu'elle n'a pas demarre: un refus passager
@@ -617,6 +672,12 @@ document.addEventListener('pointerdown', function onGesture() {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) el.input.blur();
 });
+
+// L'ecran d'accueil est visible par le balisage, sans passer par
+// showScreen(): le CSS s'y fie pour centrer l'icone du son sur l'ecran de
+// quiz, donc `data-screen` doit etre pose des le demarrage et non au premier
+// changement d'ecran. Idempotent: les trois ecrans sont deja dans le bon etat.
+showScreen('start');
 
 updateSoundButton();
 setupInstall();

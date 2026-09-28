@@ -23,9 +23,11 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SW = os.path.join(ROOT, "sw.js")
+HTML = os.path.join(ROOT, "index.html")
 
 PRECACHE = re.compile(r"^\s*'([^']+)',\s*$", re.MULTILINE)
 VERSION = re.compile(r"^const CACHE_VERSION = '([^']*)';$", re.MULTILINE)
+META = re.compile(r'<meta name="app-version" content="([^"]*)">')
 
 
 def precached_files():
@@ -56,9 +58,29 @@ def fingerprint():
         digest.update(entry.encode("utf-8"))
         digest.update(b"\0")
         with open(path, "rb") as handle:
-            digest.update(hashlib.sha256(handle.read()).hexdigest().encode())
+            contenu = handle.read()
+        if os.path.abspath(path) == os.path.abspath(HTML):
+            contenu = sans_version_affichee(contenu)
+        digest.update(hashlib.sha256(contenu).hexdigest().encode())
         digest.update(b"\0")
     return digest.hexdigest()[:8]
+
+
+def sans_version_affichee(contenu):
+    """Le numero affiche, normalise avant d'etre hache.
+
+    L'empreinte est calculee sur les fichiers precaches, dont index.html, qui
+    porte ce numero. Le hacher tel quel rend le calcul autoreferentiel: ecrire
+    une version change le fichier, donc change l'empreinte, donc la version
+    suivante differe encore. `make cache-version` ne convergeait pas -- chaque
+    passage produisait une nouvelle version, et `make` echouait toujours.
+
+    Le numero affiche est une consequence de l'empreinte, pas une entree:
+    il doit donc etre retire avant de hacher. Ce qui reste hacher, c'est le
+    contenu reellement servi au navigateur.
+    """
+    neutralise = '<meta name="app-version" content="">'
+    return META.sub(neutralise, contenu.decode("utf-8")).encode("utf-8")
 
 
 def current_version():
@@ -69,30 +91,63 @@ def current_version():
     return found.group(1)
 
 
+def html_version():
+    with open(HTML, encoding="utf-8") as handle:
+        found = META.search(handle.read())
+    if not found:
+        sys.exit('meta name="app-version" introuvable dans index.html')
+    return found.group(1)
+
+
 def write_version(version):
+    """Ecrit la version dans sw.js ET dans index.html.
+
+    Les deux doivent venir de la meme empreinte. Sans le second, l'appareil
+    affiche une version qui n'est pas celle qu'il sert, ce qui rend le
+    marqueur lui-meme incapable de depanner quoi que ce soit.
+    """
+    changed = False
+
     with open(SW, encoding="utf-8") as handle:
         source = handle.read()
     updated = VERSION.sub("const CACHE_VERSION = '%s';" % version, source, count=1)
-    if updated == source:
-        return False
-    with open(SW, "w", encoding="utf-8") as handle:
-        handle.write(updated)
-    return True
+    if updated != source:
+        with open(SW, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+        changed = True
+
+    with open(HTML, encoding="utf-8") as handle:
+        source = handle.read()
+    updated = META.sub('<meta name="app-version" content="%s">' % version, source,
+                       count=1)
+    if updated != source:
+        with open(HTML, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+        changed = True
+
+    return changed
 
 
 def main(argv):
     wanted = fingerprint()
     present = current_version()
+    affichee = html_version()
 
     if "--check" in argv:
-        if present == wanted:
-            print("ok   version du cache a jour: %s" % wanted)
-            return 0
-        print("ECHEC la version du cache est perimee.")
-        print("  sw.js annonce   %s" % present)
-        print("  contenu reel    %s" % wanted)
-        print("  -> lancer: make cache-version")
-        return 1
+        if present != wanted:
+            print("ECHEC la version du cache est perimee.")
+            print("  sw.js annonce   %s" % present)
+            print("  contenu reel    %s" % wanted)
+            print("  -> lancer: make cache-version")
+            return 1
+        if affichee != wanted:
+            print("ECHEC le numero affiche ne correspond pas au cache.")
+            print("  index.html affiche %s" % affichee)
+            print("  sw.js sert       %s" % wanted)
+            print("  -> lancer: make cache-version")
+            return 1
+        print("ok   version du cache a jour: %s" % wanted)
+        return 0
 
     if present == wanted:
         print("version du cache deja a jour: %s" % wanted)

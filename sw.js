@@ -13,7 +13,7 @@
 // un depot "mendel-web" est servi depuis /mendel-web/, donc sw.js doit y
 // etre a la racine et non dans un sous-dossier.
 
-const CACHE_VERSION = '297c7888';
+const CACHE_VERSION = 'd83e6ffc';
 
 const CACHE_NAME = `mendel-${CACHE_VERSION}`;
 
@@ -68,6 +68,48 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Le service worker repond a une question posee par la page, pour qu'elle
+// sache de quel cache elle est servie. C'est le seul moyen, pour un humain
+// devant l'appareil, de distinguer "le correctif n'a pas ete telecharge" de
+// "le correctif est nee".
+//
+// Sans cela, les deux produisent exactement le meme ecran, et l'ancien se
+// prolonge indefiniment. Voir le message `version` de index.html.
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data || data.type !== 'mendel-version') return;
+
+  // Repondu a l'expediteur, qu'il soit une fenetre ou le worker lui-meme.
+  const reply = { type: 'mendel-version-reply', version: CACHE_VERSION };
+  if (event.source && event.source.postMessage) event.source.postMessage(reply);
+  else if (self.clients) {
+    self.clients.matchAll().then((clients) => {
+      for (const client of clients) client.postMessage(reply);
+    });
+  }
+});
+
+// Toute reponse d'un cache, et NON `caches.match()`, qui parcourt TOUS les
+// caches de l'origine.
+//
+// C'etait un bug, et un bug qui masquait tous les autres. Le cache etant servi
+// en priorite, une seule lecture dans un cache perime suffisait a servir
+// indefiniment l'ancien code: le premier lancement servait l'ancien cache,
+// l'ancien service worker prenait le relais, et le nouveau n'arrivait jamais.
+// Un fichier corrige pouvait etre livre, pousse, et rester invisible sur
+// l'appareil -- ce qui donne exactement le symptome "j'ai corrige, rien ne
+// change", et impossible a distinguer d'un correctif inefficace.
+//
+// `caches.open(CACHE_NAME)` ne lit que le cache de CE service worker. Si la
+// version ne correspond pas, le nom ne correspond pas, donc la lecture
+// echoue, donc le reseau est interroge. Un cache perime ne peut plus faire
+// d'ombre au cache vivant: il ne peut plus etre lu du tout.
+//
+// Pas de revalidation en arriere-plan, et c'est un choix. Rafraichir le cache
+// courant depuis le reseau melangerait les deploiements: le `js/ui.js` du
+// nouveau deploiement dans l'ancien cache, avec l'ancien `js/data.js`, et
+// l'application ne demarre pas. Le nom du cache, derive du contenu, EST le
+// mecanisme d'invalidation; il est deterministe et sans course.
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -78,7 +120,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     // Cache d'abord: l'application est statique, la seule chose qui change
     // entre deux deploiements est la version du cache.
-    caches.match(request).then((cached) => {
+    caches.open(CACHE_NAME).then((cache) => cache.match(request)).then((cached) => {
       if (cached) return cached;
 
       return fetch(request)
@@ -94,7 +136,13 @@ self.addEventListener('fetch', (event) => {
         .catch(() => {
           // Hors-ligne et pas en cache: pour une navigation, on renvoie
           // l'ecran de depart plutot qu'une page d'erreur du navigateur.
-          if (request.mode === 'navigate') return caches.match('index.html');
+          // Meme cache que ci-dessus, et pour la meme raison: lire un cache
+          // perime ici remettrait en service l'ancien ecran d'accueil.
+          if (request.mode === 'navigate') {
+            return caches.open(CACHE_NAME)
+              .then((cache) => cache.match('index.html'))
+              .then((cached) => cached || Response.error());
+          }
           return Response.error();
         });
     }),

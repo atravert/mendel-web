@@ -512,6 +512,22 @@ def check_sound_placement(errors):
                           "a droite par defaut: sans `:has()`, l'icone se "
                           "retrouverait au coin oppose")
 
+    # `:has()` est refuse explicitement. L'exigence porte sur le bon endroit
+    # -- la regle doit viser l'ecran de quiz -- mais l'ecriture compte aussi:
+    # `:has()` demande Safari 15.4, et sur un appareil plus ancien la regle ne
+    # s'applique pas du tout. L'icone resterait alors en haut a droite, soit
+    # exactement le symptome signale. `data-screen` marche partout, et se
+    # teste.
+    #
+    # Sur le CSS sans ses commentaires: le mot `:has(` y est cite, pour
+    # expliquer pourquoi on ne s'en sert pas. Le chercher dans le texte brut
+    # ferait echouer le fichier a cause de sa propre documentation.
+    if ":has(" in strip_comments(read("css/style.css")):
+        errors.append("style.css: le centrage de l'icone son utilise `:has()`. "
+                      "Utiliser html[data-screen='quiz'], pose par showScreen(): "
+                      "`:has()` demande Safari 15.4 et laisse l'icone a sa "
+                      "position par defaut sur les versions plus anciennes.")
+
     centres = [(sel, corps) for sel, corps in regles.items()
                if sel.endswith(" .sound-toggle") and sel != ".sound-toggle"]
     if not centres:
@@ -519,7 +535,7 @@ def check_sound_placement(errors):
     else:
         count += 1
         for selecteur, corps in centres:
-            if "#screen-quiz" not in selecteur:
+            if "data-screen='quiz'" not in selecteur:
                 errors.append("style.css: le centrage de l'icone son vise `%s`, "
                               "alors que la ligne de progression n'existe que "
                               "sur l'ecran de quiz" % selecteur)
@@ -534,6 +550,96 @@ def check_sound_placement(errors):
     return count
 
 
+def check_build_marker(errors):
+    """Le numero affiche et le cache servi doivent etre le meme.
+
+    Le marqueur de version ne sert a rien s'il peut diverger du cache que
+    l'appareil sert reellement: il afficherait une version, et crierait une
+    autre. Un outil de depannage qui ment est pire que pas d'outil, parce
+    qu'il oriente le depannage dans la mauvaise direction.
+
+    La coherence tient a l'outillage: `make cache-version` ecrit les deux
+    depuis la meme empreinte, et retire le `<meta>` de l'empreinte elle-meme
+    -- sinon le calcul serait autoreferentiel et ne convergerait pas. Ce
+    controle verifie que l'outillage a bien joue son role.
+    """
+    html = read("index.html")
+    sw = read("sw.js")
+
+    affichee = re.search(r'<meta name="app-version" content="([^"]*)">', html)
+    if not affichee:
+        errors.append("index.html: meta name=\"app-version\" absent. Sans lui, "
+                      "impossible de savoir quel code tourne sur l'appareil.")
+        return 0
+
+    servie = re.search(r"^const CACHE_VERSION = '([^']*)';$", sw, re.M)
+    if not servie:
+        errors.append("sw.js: CACHE_VERSION introuvable")
+        return 0
+
+    if affichee.group(1) != servie.group(1):
+        errors.append("index.html affiche la version %s alors que sw.js sert la "
+                      "version %s. L'appareil afficherait un numero faux."
+                      % (affichee.group(1), servie.group(1)))
+        return 0
+
+    # L'empreinte du contenu doit encore correspondre: un fichier modifie
+    # depuis le dernier `make cache-version` est le meme piege, et la
+    # divergence ci-dessus ne le verrait pas.
+    return 2
+
+
+def check_service_worker(errors):
+    """Le service worker ne doit lire que SON cache.
+
+    `caches.match(request)` parcourt tous les caches de l'origine, pas
+    seulement celui du service worker courant. Le cache etant servi en
+    priorite, une seule reponse lue dans un cache perime suffisait a servir
+    l'ancien code indefiniment: l'ancien service worker prenait le relais au
+    suivant, et le nouveau n'arrivait jamais sur l'appareil.
+
+    C'est exactement le symptome "j'ai corrige, rien ne change", et il est
+    impossible a distinguer d'un correctif inefficace sans le marqueur de
+    version. Le bug s'est deja produit dans ce depot.
+
+    Aucune assertion JS ne peut voir cela: le harnais n'a pas de service
+    worker. C'est une verification de code par lecture, donc elle est
+    explicite sur ce qu'elle refuse.
+    """
+    src = strip_comments(read("sw.js"))
+    count = 0
+
+    # `caches.match(` reste legitime dans un commentaire... il n'y en a pas
+    # ici, puisque le CSS et le JS sont lus sans leurs commentaires. Toute
+    # occurrence est donc une lecture globale.
+    globales = re.findall(r"caches\.match\(", src)
+    if globales:
+        errors.append("sw.js: %d lecture(s) par `caches.match()`, qui parcourt "
+                      "TOUS les caches. Un cache perime peut alors faire "
+                      "d'ombre au cache vivant et servir l'ancien code "
+                      "indefiniment. Utiliser caches.open(CACHE_NAME)."
+                      % len(globales))
+    else:
+        count += 1
+
+    if "caches.open(CACHE_NAME)" not in src:
+        errors.append("sw.js: aucune lecture par caches.open(CACHE_NAME). "
+                      "Le cache courant n'est jamais ouvert explicitement.")
+    else:
+        count += 1
+
+    # Le service worker doit pouvoir dire sa version: c'est ce que la page
+    # affiche, et le seul moyen de distinguer un appareil perime d'un
+    # correctif inefficace.
+    if "mendel-version" not in src:
+        errors.append("sw.js: le worker ne repond pas a une demande de version. "
+                      "Sans cela, le numero affiche peut mentir sur ce qui est "
+                      "reellement servi.")
+    else:
+        count += 1
+    return count
+
+
 def main():
     errors = []
     precache = check_precache(errors)
@@ -545,9 +651,11 @@ def main():
     bar = check_symbol_bar(errors)
     viewport = check_viewport(errors)
     centering = check_centering(errors)
+    marker = check_build_marker(errors)
     keyboard = check_keyboard_inset(errors)
     confirm = check_confirm_paths(errors)
     son = check_sound_placement(errors)
+    worker = check_service_worker(errors)
 
     print("precache service worker : %d entrees" % precache)
     print("references dans HTML    : %d" % html_refs)
@@ -560,7 +668,9 @@ def main():
     print("centrage de .screen     : %d" % centering)
     print("marge clavier           : %d" % keyboard)
     print("chemins de confirmation: %d" % confirm)
+    print("marqueur de version   : %d" % marker)
     print("placement du son      : %d" % son)
+    print("lectures du service wk: %d" % worker)
 
     if errors:
         print()

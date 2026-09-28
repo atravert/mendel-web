@@ -20,6 +20,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="mobile-web-app-capable" content="yes">
 
+<!-- Le numero de version, affiche en bas de l'ecran d'accueil.
+     Ecrit par tools/sync-cache-version.py, comme CACHE_VERSION dans sw.js, et
+     verifie par make verify. Sans lui, impossible de distinguer un appareil
+     qui tourne encore l'ancien code d'un appareil ou le correctif echoue:
+     les deux affichent exactement la meme chose. -->
+<meta name="app-version" content="d83e6ffc">
+
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -46,6 +53,12 @@
     </div>
 
     <p class="hint-line">10 questions par série.</p>
+
+    <!-- Version affichee, sur cet ecran et sur celui du resultat. Un appareil
+         qui tourne encore l'ancien code affiche exactement la meme chose
+         qu'un appareil ou un correctif echoue: sans ce numero, les deux sont
+         indistinguables, et le depannage tourne en rond. -->
+    <p class="version-line" id="version-start"></p>
 
     <div class="install" id="install-area" hidden>
       <button class="button button--ghost" type="button" id="install-button" hidden>
@@ -145,6 +158,8 @@
   <section id="screen-result" class="screen" hidden>
     <p class="result-comment" id="result-comment"></p>
     <p class="result-score" id="result-score"></p>
+
+    <p class="version-line" id="version-result"></p>
 
     <div class="choices">
       <button class="button button--primary" type="button" id="restart-button">

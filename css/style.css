@@ -203,13 +203,17 @@ html[data-keyboard='open'] { --safe-bottom: 0px; }
    la ligne. Sans `var(--progress-h)`, il faudrait ecrire 11 en dur, et la
    ligne pourrait changer de hauteur sans que l'icone s'en apercoive.
 
-   `:has()` est Safari 15.4 et plus. En dessous, l'icone reste en haut a
-   droite, c'est-a-dire exactement la position precedente: la degradation
-   n'est pas une panne. Le motif cible l'ecran de quiz SEUL, parce que la
-   ligne de progression n'existe que la -- et sur l'ecran de resultat le
-   contenu est centre et peut etre haut, un commentaire retro d'unequis
-   debordant largement. */
-body:has(#screen-quiz:not([hidden])) .sound-toggle {
+   Le motif cible l'ecran de quiz SEUL, parce que la ligne de progression
+   n'existe que la -- et sur l'ecran de resultat le contenu est centre et peut
+   etre haut, sous un commentaire retro d'unequis.
+
+   `data-screen` est pose par showScreen(), et pas `:has()`. `:has()` parait
+   plus court, mais il demande Safari 15.4: sur un appareil plus ancien, la
+   regle ne s'applique pas du tout et l'icone reste en haut a droite, ce qui
+   est precisement le symptome signale. Un attribut est accepte partout, et
+   surtout il se TESTE: le harnais peut affirmer que l'ecran de quiz porte
+   bien `data-screen="quiz"`, ce qu'aucun test ne peut faire pour `:has()`. */
+html[data-screen='quiz'] .sound-toggle {
   left: 50%;
   right: auto;
   top: calc(
@@ -452,6 +456,17 @@ body:has(#screen-quiz:not([hidden])) .sound-toggle {
 /* --------------------------------------------------------------------------
    Utilitaires
    -------------------------------------------------------------------------- */
+
+/* Le numero de version. Discret, mais lisible: c'est un outil de depannage,
+   donc sa lisibilite prime sur son absence de visibilite. */
+.version-line {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  opacity: 0.7;
+  text-align: center;
+  word-break: break-all;
+}
 
 .visually-hidden {
   position: absolute;
