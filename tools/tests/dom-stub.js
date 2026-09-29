@@ -245,20 +245,6 @@ function createDocument(html, topicIds) {
     };
   }
 
-  // Le bouton qui deroule la barre vit DANS le formulaire, donc dans l'ecran
-  // de quiz. C'est ce qui rend inutile une parade `pointerdown` qui lui soit
-  // propre: celle de l'ecran le couvre deja, puisque son selecteur est
-  // `closest('button')`.
-  //
-  // Le lien doit donc etre pose, sinon une assertion du genre "le bouton des
-  // symboles bloque la prise de focus" passerait par une parade inexistante
-  // sur la page -- le meme piege que pour les deux boutons d'action, et pour la
-  // meme raison. Il se reconnait aussi a `closest('button')`, comme eux.
-  const symbolToggle = doc._elements['symbol-toggle'];
-  if (symbolToggle) {
-    symbolToggle.closest = (selector) => (selector === 'button' ? symbolToggle : null);
-  }
-
   // Les deux boutons d'action sont enfants de la ZONE D'ACTION, elle-meme
   // enfant de la coque. Ils ne sont donc PAS dans #screen-quiz -- et c'est
   // exactement pour ca qu'ils ont besoin de leur propre parade `pointerdown`.
@@ -292,15 +278,6 @@ function createDocument(html, topicIds) {
   // propre clic ne serait jamais exerce.
   const quizScreen = doc._elements['screen-quiz'];
   if (quizScreen) quizScreen._parent = doc;
-
-  // Le formulaire est dans l'ecran de quiz, et le bouton des symboles dans le
-  // formulaire: la remontee doit donc passer par les deux, sinon la parade de
-  // l'ecran ne le verrait pas. Le stub saute `<form>` de la meme facon qu'il
-  // saute `<main>` et `<body>`: seul le dernier relai compte, et c'est ce qui
-  // rend la cascade reelle.
-  const form = doc._elements['answer-form'];
-  if (form) form._parent = quizScreen || null;
-  if (symbolToggle) symbolToggle._parent = form || null;
 
   // Le champ de reponse remonte jusqu'au document.
   //
@@ -367,7 +344,6 @@ function wireDom(doc) {
   return {
     input: doc._elements['answer-input'],
     symbolBar: doc._elements['symbol-bar'],
-    symbolToggle: doc._elements['symbol-toggle'],
     // Touches d'insertion, dans l'ordre de index.html: + - ( ) puis 0 a 9.
     keys: doc._insertKeys || [],
     // Touches d'indice et d'exposant: sub puis sup

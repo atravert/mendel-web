@@ -93,51 +93,18 @@ function syncViewport() {
 }
 
 /**
- * Ce que dit le bandeau quand quelque chose ne rentre pas.
+ * Mesure, sur l'appareil, ce qui ne rentre pas dans la zone visible.
  *
- * Le texte nomme l'ETAT, parce que le message d'origine ne le faisait pas et
- * qu'il decrivait donc un autre ecran que celui qu'il mesurait: il promettait
- * "le retour" sur une question qui n'avait pas encore ete reponse, et c'est
- * precisement le cas que l'appareil a signale -- 324 px de contenu, soit
- * exactement l'etat AVANT reponse.
+ * C'est P5 dans le README, et l'existence meme de cette fonction est un aveu.
+ * Le CSS annoncait 469 px de contenu pour 508 px disponibles sur un iPhone 15:
+ * deux nombres CALCULES, jamais mesures. Le premier ne decrivait que l'etat
+ * avant reponse, alors que l'etat apres reponse demande jusqu'a 601 px. Un
+ * iPhone 15 Pro a refuse le calcul, et le commentaire comme le bouton Suivant
+ * ont disparu de l'ecran.
  *
- * Apres la reponse, le retour existe et peut deborder a son tour. Avant, ce
- * qui deborde est le champ. Et si la barre de symboles est deployee, c'est
- * elle qu'il faut replier: le dire vaut mieux que laisser deviner.
- */
-function texteDebordement(manque, contenu, disponible) {
-  const etat = state.answered ? 'apres reponse' : 'avant reponse';
-  const remedy = state.answered
-    ? 'Defilez pour lire le retour.'
-    : (el.symbolBar.hidden
-      ? 'Defilez pour atteindre le champ.'
-      : 'Refermez la barre de symboles pour tout faire tenir.');
-  return `Il manque ${manque} px, ${etat} : ${contenu} px de contenu pour `
-    + `${disponible} px visibles. ${remedy}`;
-}
-
-/**
- * Mesure, sur l'appareil, ce qui ne rentre pas dans la zone visible -- puis
- * resserre ce qui peut l'etre.
- *
- * C'est P5 et P6 dans le README, et l'existence meme de cette fonction est un
- * aveu. Le CSS annoncait 469 px de contenu pour 508 px disponibles sur un
- * iPhone 15: deux nombres CALCULES, jamais mesures. Le premier ne decrivait que
- * l'etat avant reponse. Un iPhone 15 Pro a refuse le calcul, et le commentaire
- * comme le bouton Suivant ont disparu de l'ecran.
- *
- * L'appareil a tranche: 324 px de contenu pour 210 px visibles sur la serie
- * ions, soit 116 px de barre de symboles et un enonce que rien ne pouvait
- * faire descendre de plus de 20 px. Il n'y avait pas de mise en page a
- * trouver, il y avait trop de contenu. D'ou la deuxieme partie: constater le
- * debordement, resserrer ce qui peut l'etre, et re-mesurer.
- *
- * Le resserrement est pilote par la MESURE, pas par un seuil de hauteur. Un
- * seuil serait un nombre invente, donc faux sur tout appareil qui ne lui
- * ressemble pas exactement; et une requete `@media (max-height)` ne peut pas
- * fonctionner ici, puisque sur iOS le viewport de mise en page ne retrecit
- * pas quand le clavier se leve. C'est le meme piege que
- * `interactive-widget=resizes-content`, qui n'existe que sur Chrome.
+ * Aucune assertion JS ne voit cela: elle verifierait que le commentaire
+ * EXISTE -- ce qui est vrai -- et jamais qu'il est sous le clavier. Seule une
+ * mesure, sur la machine qui echoue, peut le dire.
  *
  * Le bandeau n'apparait que s'il deborde. Permanent, il serait du bruit qu'on
  * arrete de lire; conditionnel, il ne peut pas etre manque -- et il n'a rien a
@@ -148,65 +115,28 @@ function mesurerDebordement() {
   const ecran = el.screens.quiz;
   if (!bandeau) return;
 
-  // Le bandeau se masque AVANT toute lecture.
-  //
-  // Il est enfant de la coque, comme la zone d'action: il occupe donc de la
-  // place sur CELLE de `.screen`, et toute mesure faite pendant qu'il est
-  // visible le lit en deduction. Un diagnostic qui s'ajoute au defaut qu'il
-  // mesure se grossit lui-meme a chaque relecture, puisque rien ne le
-  // refermait: le nombre de px manquants qu'il annonceait grossissait avec
-  // lui, sans que personne ne puisse dire combien de la premiere lecture
-  // etait juste. Un instrument qui deforme sa propre mesure n'en est plus un.
-  //
-  // Le 114 px que l'appareil a rapportes sont peut-etre deja gonfles de la
-  // sorte, et peut-etre pas: sans la mesure precede du masquage, la lecture
-  // rapportee ne le dit pas. Ce qui est sur, c'est que 324 px de contenu ne
-  // change pas -- et que la place reellement disponible, elle, ne se lit bien
-  // que bandeau masque.
-  bandeau.hidden = true;
-
   // Sur un ecran masque, `clientHeight` et `scrollHeight` valent 0: leur
   // difference vaut 0, donc le bandeau resterait muet PAR HASARD. On demande
   // l'ecran de quiz nominativement, pour que son silence soit une decision.
-  if (ecran.hidden || !ecran.clientHeight) return;
+  if (ecran.hidden || !ecran.clientHeight) {
+    bandeau.hidden = true;
+    return;
+  }
 
   // La tolerance d'un pixel: ces deux hauteurs sont arrondies, et un
   // debordement d'un demi-pixel n'a rien de reel. Sans elle, le bandeau
   // pourrait s'afficher sur un ecran qui tient exactement.
-  const disponible = ecran.clientHeight;
-  const contenu = ecran.scrollHeight;
-  const manque = contenu - disponible;
-  if (manque <= 1) return;
-
-  // Resserre une fois, puis re-mesure. Le mode est VERROUILLE: le decomposer
-  // puis le recomposer au fil des mesures ferait osciller la mise en page d'un
-  // bord a l'autre, et l'icone du son, qui lit la meme `var(--pad)` que la
-  // coque, monterait et descendrait avec elle. Un cran suffit: `--gap` double
-  // de moins, `--pad` reduit, le type de question masque, la barre repliee.
-  //
-  // Ce cran rend 116 px de barre pour 48 px de bouton, donc 68 px, et 28 px de
-  // type de question, et 48 px d'intervalles et de marge: 324 px de contenu
-  // deviennent 208, pour 226 disponibles. Les trois nombres sortent de
-  // `make budget`; le mode n'a pas d'effet propre qu'on puisse lui attribuer,
-  // parce qu'il n'en est qu'un des leviers.
-  //
-  // Si ca deborde quand meme, ce n'est plus une question de mise en page: le
-  // bandeau le dit, et le joueur a toujours la barre a deployer et a refermer.
-  if (!state.compact) {
-    state.compact = true;
-    document.documentElement.setAttribute('data-compact', '1');
-    // Le mode compact change ce qui est visible -- et donc ce que la mesure
-    // doit porter. Sans cet appel, la barre resterait deployee, la place
-    // rendue par le reste ne suffirait pas, et le mode compact serait pose
-    // pour rien.
-    refreshSymbolZone();
-    mesurerDebordement();
+  const debordement = ecran.scrollHeight - ecran.clientHeight;
+  if (debordement <= 1) {
+    bandeau.hidden = true;
     return;
   }
 
   // Les deux chiffres bruts, parce que ce sont eux qu'il faut rapporter. Un
-  // "ca ne rentre pas" ne se corrige pas; "324 px pour 210 px" se corrige.
-  bandeau.textContent = texteDebordement(manque, contenu, disponible);
+  // "ca ne rentre pas" ne se corrige pas; "601 px pour 508 px" se corrige.
+  bandeau.textContent =
+    `Il manque ${debordement} px : ${ecran.scrollHeight} px de contenu pour `
+    + `${ecran.clientHeight} px visibles. Defilez pour lire le retour.`;
   bandeau.hidden = false;
 }
 
@@ -224,20 +154,6 @@ const state = {
   // Reinitialise a chaque question, sinon un modearme par erreur
   // contaminerait la question suivante.
   script: null,
-  // La mise en page a-t-elle ete resserree parce qu'elle debordait reellement?
-  // Pose par mesurerDebordement(), retire par renderQuestion(). Voir P6.
-  //
-  // Volontairement par QUESTION, et non par session: chaque enonce a sa
-  // hauteur, et un ecran qui tient a la question 3 ne doit pas rester
-  // resserre parce que la 2 debordait. C'est aussi ce qui borne la correction
-  // a un seul cran, et interdit donc toute oscillation.
-  compact: false,
-  // Le joueur a-t-il demande la barre de symboles alors qu'elle etait
-  // repliee? Un choix, pas un etat de mise en page: il survit a la question
-  // suivante, parce que celui qui veut la barre en veut dix fois de suite et
-  // ne devrait pas avoir a la redemander a chaque enonce. Remis a zero par
-  // startQuiz(): une nouvelle serie, c'est une nouvelle session.
-  symbolsOpen: false,
 };
 
 const el = {
@@ -255,7 +171,6 @@ const el = {
   form: document.getElementById('answer-form'),
   input: document.getElementById('answer-input'),
   symbolBar: document.getElementById('symbol-bar'),
-  symbolToggle: document.getElementById('symbol-toggle'),
   validateButton: document.getElementById('validate-button'),
   feedback: document.getElementById('feedback'),
   nextButton: document.getElementById('next-button'),
@@ -335,43 +250,6 @@ function expectsFormula(question) {
   return question.topic === 'ions' && question.direction === DIRECTION.NAME_TO_CODE;
 }
 
-/**
- * Un seul proprietaire de l'etat visible de la barre de symboles, et de son
- * bouton.
- *
- * Ni le balisage ni le CSS ne peuvent en decider seuls. `hidden` est pose ici
- * dans tous les cas, et `refreshSymbolZone()` est appele par renderQuestion(),
- * par validate() et par mesurerDebordement() -- donc apres tout changement
- * qui touche a l'un des deux etats dont il depend:
- *
- *   - la question (une formule, ou non);
- *   - la reponse, qui rend la barre INUTILE: on ne compose plus rien, et c'est
- *     precisement quand le commentaire et Suivant ont besoin de la place. Ces
- *     116 px sont la difference entre 319 px de contenu et 203, et les 210 px
- *     que l'appareil a mesures -- 319 et 203 sont CALCULES, par `make budget`,
- *     a partir de la feuille; 210 est la seule mesure;
- *   - le mode compact, qui la replie derriere un bouton tant que le joueur ne
- *     la demande pas.
- *
- * Deux sources se disputant la meme propriete, la derniere_posee gagnerait:
- * un `hidden` de validate() serait annule par le rendu suivant, ou l'inverse
- * selon l'ordre. Un seul proprietaire rend la regle observable, donc testable.
- */
-function refreshSymbolZone() {
-  const question = state.questions[state.index];
-  const attendue = !state.answered && expectsFormula(question);
-  const deployee = attendue && (state.symbolsOpen || !state.compact);
-
-  el.symbolBar.hidden = !deployee;
-  // Le bouton n'a de raison d'exister qu'en mode compact: c'est la qu'il
-  // evite 68 px. Ailleurs, la barre est deja visible et le bouton ne ferait
-  // qu'un ecran de plus a remplir.
-  el.symbolToggle.hidden = !(attendue && state.compact);
-  // `aria-expanded` suit l'ouverture reelle, pas la demande: une barre masquee
-  // par une reponse n'est pas une barre ouverte que le joueur peut refermer.
-  el.symbolToggle.setAttribute('aria-expanded', String(deployee));
-}
-
 function renderQuestion() {
   const question = state.questions[state.index];
 
@@ -403,17 +281,7 @@ function renderQuestion() {
   // un etat qui n'existe pas.
   document.documentElement.removeAttribute('data-answered');
 
-  // Le mode compact, lui, se repose a chaque question. Il mesure la place
-  // qu'il faut, et cette place change d'un enonce a l'autre: une formule
-  // courte tient la ou un nom long deborde. Le garder d'une question a l'autre
-  // resserrerait un ecran qui n'en a pas besoin, et -- le bouton son lisant la
-  // meme `var(--pad)` que la coque -- ferait monter l'icone de 8 px sans
-  // raison. C'est donc le seul etat de mise en page qui ne survive pas a la
-  // question.
-  state.compact = false;
-  document.documentElement.removeAttribute('data-compact');
-
-  refreshSymbolZone();
+  el.symbolBar.hidden = !expectsFormula(question);
   setScript(null);
 
   // Le curseur doit etre dans le champ des la question posee, sans que
@@ -486,7 +354,6 @@ function startQuiz(topicId) {
   state.index = 0;
   state.score = 0;
   state.answered = false;
-  state.symbolsOpen = false;
   resetCommentHistory();
 
   sound.unlock();
@@ -546,12 +413,6 @@ function validate() {
   el.nextButton.textContent =
     state.index === state.questions.length - 1 ? 'Voir le résultat' : 'Question suivante';
   el.nextButton.hidden = false;
-
-  // La barre de symboles part avec la reponse comptee. On ne compose plus
-  // rien, et ces 116 px sont exactement la place que le commentaire et le
-  // bouton Suivant viennent de devoir trouver. Apres la reponse, la zone
-  // visible est la plus etroite de la serie: c'est la qu'il faut rendre.
-  refreshSymbolZone();
 
   // Surtout pas `nextButton.focus()`, qui fut la premiere version: deplacer le
   // focus hors du champ ferme le clavier, donc retrecit le viewport, donc fait
@@ -813,31 +674,7 @@ el.soundToggle.addEventListener('click', () => {
   updateSoundButton();
 });
 
-// Le bouton qui deroule la barre.
-//
-// Il est dans le formulaire, donc dans `#screen-quiz`, et la parade de
-// l'ecran couvre deja tous ses boutons: il n'en faut donc pas une qui lui soit
-// propre. Le dire ici, parce que le motif general de ce fichier est justement
-// "tout bouton visible dans l'ecran de quiz mais place ailleurs doit porter sa
-// parade" -- et celui-ci n'est PAS ailleurs. Une parade de plus n'aurait pas ete
-// fausse, seulement inutile.
-el.symbolToggle.addEventListener('click', () => {
-  // Inverser l'etat demande, pas l'etat affiche. Le bouton apparait en mode
-  // compact; si le joueur l'ouvre alors que la reponse est deja comptee --
-  // impossible par construction, mais possible par une course future -- il ne
-  // doit pas s'ouvrir pour autant: `refreshSymbolZone()` refuse d'ouvrir une
-  // barre apres la reponse, et c'est elle qui tranche.
-  state.symbolsOpen = !state.symbolsOpen;
-  refreshSymbolZone();
-
-  // Le contenu visible vient de changer de 68 px, donc la place disponible
-  // compte, et c'est le moment de la mesurer. Le bandeau dira s'il ne tient
-  // toujours pas, plutot que de laisser un debordement muet: c'est le
-  // repli du joueur, son choix, et une place qui ne suffit plus doit se dire.
-  mesurerDebordement();
-});
-
-// Empecher le retrait du focus: sans cela, taper sur une touche de la barre
+// Empêcher le retrait du focus: sans cela, taper sur une touche de la barre
 // de symboles ferme le clavier a chaque fois. `pointerdown` couvre souris,
 // tactile et stylet, la ou `mousedown` manque sur les appareils tactiles.
 el.symbolBar.addEventListener('pointerdown', (event) => {

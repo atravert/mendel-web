@@ -23,31 +23,22 @@ hors-ligne ; ouvrir `index.html` par `file://` ne suffit pas.
 ## Vérifier
 
 ```sh
-make            # tout
+make            # syntaxe + tests + cohérence des fichiers
 ```
+
+Trois contrôles, tous exécutables sans rien installer :
 
 | Commande | Ce qu'elle fait |
 |---|---|
-| `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. Recherche aussi les caractères parasites d'une autre écriture dans les commentaires. |
-| `make test` | 369 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
-| `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS, ancrage du centrage, marge de l'indicateur d'accueil, chemins de confirmation, placement de l'icône du son, barre d'action, mode compact. |
-| `make budget` | Recalcule le budget vertical **dans le CSS** et le compare au tableau écrit en clair dans la feuille. Échoue s'ils divergent. |
+| `make syntax` | Analyse lexicale des `.js` : chaînes non fermées, commentaires infinis, regex mal fermées. Remplace `node --check`, absent de la machine. |
+| `make test` | 266 assertions sur la logique et sur l'interface, exécutées dans le JavaScriptCore d'Apple. |
+| `make verify` | Compare le code aux fichiers réels : entrées du précache, icônes du manifeste, imports, identifiants du DOM, barre de symboles, variables de viewport partagées entre le JS et le CSS, ancrage du centrage, marge de l'indicateur d'accueil, chemins de confirmation, placement de l'icône du son. |
 | `make cache-version` | Recalcule `CACHE_VERSION` dans `sw.js` d'après l'empreinte des fichiers précachés. |
-| `make mutations` | Casse le code 21 fois, une mutation à la fois, et exige que chacune soit vue. Hors de `make` : chaque mutation lance une vérification complète. |
 | `make online` | Le site publié sert-il la version locale ? Demande le réseau. |
 
-Les cinq premiers n'utilisent que `python3` et le JavaScriptCore d'Apple.
-`make mutations` ne demande rien de plus, mais reste **hors de `make`** parce
-qu'il transforme un contrôle habituel en quelques minutes : c'est une
-vérification de la vérification, pas du code. `make online` est hors de `make`
-pour une autre raison : il demande le réseau, et une vérification de code ne
-doit pas en dépendre.
-
-**`make budget` mérite sa place dans la liste.** Le tableau du budget vertical
-décrit `css/style.css` au pixel près, et il vit dans un commentaire — c'est-à-dire
-un endroit qu'aucun outil ne relit. L'outil le recalcule et le confronte, donc il
-ne peut pas redevenir faux en silence quand une valeur change. Le détail
-s'affiche avec `python3 tools/budget.py --table`.
+Les quatre premiers n'utilisent que `python3` et le JavaScriptCore d'Apple. Le
+cinquième est volontairement **hors de `make`** : il demande le réseau, et une
+vérification de code ne doit pas en dépendre.
 
 Le harnais a deux extensions qui méritent d'être connues, parce qu'elles
 rendent testable ce qui ne l'était pas :
@@ -298,90 +289,26 @@ Aucun n'avait été mesuré sur un appareil.
 Et le 469 px ne décrivait que l'état **avant** réponse. Or les deux éléments
 dont la disparition a été signalée — le bandeau de commentaire et le bouton
 « Question suivante » — n'existent **qu'après** réponse, et ils étaient les
-deux derniers enfants du flux, donc les deux premiers à sortir.
+deux derniers enfants du flux, donc les deux premiers à sortir :
+
+| État | Contenu requis |
+|---|---|
+| Avant réponse (ion, barre de symboles visible) | **468 px** |
+| Après réponse, commentaire sur 1 ligne | **555 px** |
+| Après réponse, commentaire sur 3 lignes (mauvaise réponse) | **601 px** |
+
+Le cas le plus défavorable est la **mauvaise réponse** : `renderFeedback()`
+ajoute « La bonne réponse était : … » dans un bandeau en `white-space:
+pre-line`. Le commentaire le plus long de `data.js` fait 85 caractères, sans
+saut de ligne ; ajouté à cette phrase, il tient sur trois lignes.
+
+Le budget annoncé ne pouvait donc pas tenir : **déficit de 47 à 93 px, avant de
+compter un seul pixel de barre Safari.** Un iPhone 15 Pro l'a refusé, et le
+commentaire comme le bouton Suivant ont disparu de l'écran.
 
 C'est la même faute que celle déjà commise sur la touche retour : **affirmer un
-nombre dérivé d'un modèle de la plateforme au lieu de l'observer.**
-
-#### Ce que l'appareil a réellement dit
-
-Sur la série ions, clavier ouvert, dans un **onglet** Safari :
-
-```
-Il manque 114 px : 324 px de contenu pour 210 px visibles. Défilez pour lire le retour.
-```
-
-Les 324 px se décomposent **exactement**, et chaque terme se lit tel quel dans
-la feuille de style :
-
-| Terme | px | Où il est écrit |
-|---|---:|---|
-| `.progress-row` | 22 | `--progress-h` |
-| `.rule` | 1 | `height: 1px` |
-| `.question-type` | 20 | `14px` × interligne du `body` |
-| `.prompt` | 53 | `clamp(30px, 11vw, 44px)` = 44, × 1.2 |
-| `.answer-input` | 48 | `--tap` |
-| `.symbol-bar` | 116 | `12 + 48 + 8 + 48` |
-| quatre intervalles | 64 | `--gap: 16px` × 4 |
-| **total** | **324** | |
-
-Deux conséquences, et la première était un défaut de mon propre diagnostic.
-
-**1. C'est l'état avant réponse.** Le bandeau annonçait pourtant « Défilez pour
-lire le retour » — alors qu'aucun retour n'existe encore, et que c'est le
-**champ** qui déborde. Le message décrivait un autre écran que celui qu'il
-mesurait. `texteDebordement()` nomme désormais l'état, et le remède change avec
-lui : le retour après réponse, le champ avant, et « Refermez la barre de
-symboles » quand elle est déployée.
-
-**2. Le 210 px se lisait avec le bandeau déjà à l'écran.** Le bandeau est enfant
-de la coque, comme la zone d'action : il occupe donc de la place sur *celle* de
-`.screen`, et la mesure suivante le comptait en déduction. **Un diagnostic qui
-s'ajoute au défaut qu'il mesure se grossit lui-même**, et rien ne le refermait.
-`mesurerDebordement()` le masque maintenant **avant** toute lecture. On ne peut
-plus dire combien des 114 px rapportés étaient réels : la lecture ne le
-permet pas. Ce qui est sûr, c'est que **324 px de contenu ne change pas** et que
-la place disponible ne se lit bien que bandeau masqué.
-
-**La barre de symboles en prenait 116 : plus de la moitié.** Ce n'était donc pas
-un problème de mise en page, c'était un problème de **contenu** — et aucun
-agencement n'aurait fait tenir 324 px dans 210 px sans rendre quelque chose.
-
-#### Le budget, calculé et non recopié
-
-`make budget` recalcule ces hauteurs **dans `css/style.css`** et compare le
-résultat au tableau écrit en clair dans le commentaire de la feuille. Il échoue
-si les deux divergent. La table ci-dessous est sa sortie, pas une recopie.
-
-Le premier chiffre est ce que l'appareil a dit, et l'outil le **retrouve seul** :
-
-```
-largeur 402 px, place visible 210 px (mesurée)
-
-  normal / avant reponse          324 px  (5 éléments)  pour  210 px  manque 114 px
-  normal / apres reponse          203 px  (4 éléments)  pour  210 px  tient (+7)
-  compact / avant reponse         208 px  (4 éléments)  pour  226 px  tient (+18)
-  compact / apres reponse         179 px  (4 éléments)  pour  226 px  tient (+47)
-  compact / barre deployee        264 px  (4 éléments)  pour  226 px  manque 38 px
-```
-
-Deux choses dans cette table ne se déduisent pas du CSS, et sont **données en
-paramètre** plutôt qu'inventées : la largeur de 402 px, parce que la taille de
-l'énoncé est un `clamp(…, 11vw, 44px)` ; et les 210 px visibles, **mesurés**.
-Tout le reste se lit dans la feuille — y compris le nombre de lignes du pire
-commentaire, qui est le plus long des 79 de `data.js`, plié à la largeur utile.
-
-Les intervalles se comptent entre **éléments rendus**, pas entre éléments du
-balisage : un élément masqué sort du flux, et son intervalle avec. C'est la
-différence entre 324 et 357, et c'est exactement le détail qui avait produit le
-premier chiffre faux.
-
-Et la place visible **n'est pas la même** dans les deux modes : les 210 px ont
-été mesurés avec `--pad: 20px`, donc avec 40 px de marge de coque ; en mode
-compact il n'y en a plus que 24, et la même zone visible en rend 16 de plus.
-Comparer le contenu compact aux 210 px d'origine afficherait un déficit de 2 px
-là où il n'y en a pas — et un déficit de 2 px est le genre de chiffre qui envoie
-chercher un arrondi inexistant pendant une heure.
+nombre dérivé d'un modèle de la plateforme au lieu de l'observer.** Ce qui compte
+désormais, c'est qu'il se corrige en mesurant — voir ci-dessous.
 
 ### Quand il n'y a pas assez de place
 
@@ -462,83 +389,34 @@ l'affirmation seulement (*voir* « Ce qui est vérifié, et comment »).
 
 **P5 — L'appareil mesure son propre débordement.** `mesurerDebordement()`
 compare `scrollHeight` et `clientHeight` de l'écran de quiz, et affiche un
-bandeau **seulement s'il déborde**. Il est appelé à chaque changement de hauteur
-visible, pas seulement au rendu : c'est ainsi qu'un débordement apparaît ou
-disparaît aussi à une rotation ou à une ouverture de clavier en cours de partie.
+bandeau **seulement s'il déborde** : `Il manque 93 px : 601 px de contenu pour
+508 px visibles. Défilez pour lire le retour.`
+
+Il est appelé à chaque changement de hauteur visible, pas seulement au rendu :
+c'est ainsi qu'un débordement apparaît ou disparaît aussi à une rotation ou à une
+ouverture de clavier en cours de partie.
 
 Le bandeau n'apparaît que dans le cas problématique. Permanent, ce serait du
 bruit qu'on arrête de lire — et un diagnostic qu'on ne lit plus est un
-diagnostic qu'on n'a pas. **Les deux chiffres bruts y sont**, parce que « ça ne
-rentre pas » ne se corrige pas, et « 324 px pour 210 px » se corrige.
+diagnostic qu'on n'a pas.
+
+**Les deux chiffres bruts y sont**, parce que « ça ne rentre pas » ne se corrige
+pas, et « 601 px pour 508 px » se corrige. C'est ce que l'utilisateur peut
+ rapporter, et c'est le nombre qu'il fallait.
 
 Et la tolérance est d'un pixel : ces deux hauteurs sont arrondies par le
 navigateur, et un demi-pixel de débordement n'a rien de réel. Sans elle, le
 bandeau s'afficherait sur un écran qui tient exactement, et l'utilisateur
 finirait par l'ignorer.
 
-Ni `verify.py` ni les assertions ne peuvent voir la mise en page : le faux DOM
-n'a pas de moteur de rendu, et une assertion qui dirait « le commentaire est
-sous le clavier » serait une assertion sur rien. Ce que les tests vérifient,
-c'est que l'application **réagit correctement à une mesure** ; les nombres sont
-posés à la main dans le test, et personne ne les calcule. Un test qui prétendrait
-mesurer la hauteur simulerait exactement le défaut qu'il est censé attraper.
-
-**P6 — Ce qui ne rentre pas, on le rétrécit, et c'est l'appareil qui le décide.**
-C'est la suite de P1 à P5, et elle vient de la mesure ci-dessus.
-
-**La barre de symboles part avec la réponse.** On ne compose plus rien une fois
-la réponse comptée, et c'est précisément quand le commentaire et Suivant ont
-besoin de la place : 319 px de contenu deviennent 203, pour 210 disponibles. Un
-gain de 116 px sans rien retirer à ce qui se touche au doigt.
-
-**Avant la réponse, elle se replie derrière un bouton**, et le reste se resserre.
-Le repli est une **disposition** : `aria-expanded`, `aria-controls`, un bouton
-de 48 px comme toutes les autres cibles tactiles. Le choix du joueur **survit à
-la question** — celui qui veut la barre en veut dix fois de suite — mais **pas à
-une nouvelle série**.
-
-**Le resserrement est déclenché par une mesure, jamais par un seuil deviné.** Un
-seuil de hauteur serait un nombre inventé, donc faux sur tout appareil qui ne lui
-ressemble pas exactement. Pire, il ne fonctionnerait pas du tout : sur iOS le
-viewport de **mise en page** ne rétrécit pas quand le clavier se lève, donc une
-requête `@media (max-height: …)` y verrait toujours la hauteur de l'écran et ne
-se déclencherait jamais. C'est **exactement le piège de
-`interactive-widget=resizes-content`**, qui n'existe que sur Chrome et qui a
-déjà fait perdre une version entière de mise en page.
-
-`mesurerDebordement()` constate donc le débordement sur la machine qui échoue,
-pose `html[data-compact='1'`, et **re-mesure**. Les quatre leviers — `--gap`,
-`--pad`, `.question-type` masqué, barre repliée — rendent 324 px en 208, pour
-226 disponibles.
-
-`tools/verify.py` **refuse** toute requête de média sur la hauteur, et vérifie
-que les deux variables du mode compact sont **numériquement plus petites** que
-celles de `:root`. Comparer leurs noms passerait avec `--gap: 16px`, qui est la
-valeur de base et ne rend donc aucun pixel : le mode serait posé, annoncé, et
-sans effet.
-
-Le mode est **verrouillé** pour la question en cours. Le décomposer puis le
-recomposer au fil des mesures ferait osciller la mise en page d'un bord à
-l'autre — et l'icône du son, qui lit la **même** `var(--pad)` que la coque,
-monterait et descendrait avec elle. Il se repose à la question suivante, parce
-que chaque énoncé a sa hauteur.
-
-Le bandeau, lui, **ne ment pas** sur le repli : si le joueur déploie la barre
-et que ça déborde (264 px pour 226), il le dit et propose de la refermer. C'est
-un choix, pas un défaut, et un débordement choisi en connaissance de cause qui
-resterait muet serait un débordement invisible.
-
-`refreshSymbolZone()` est le **seul propriétaire** des deux propriétés `hidden`.
-Ni le balisage ni le CSS n'en décident seuls : deux sources se disputant la même
-propriété, la dernière posée gagnerait, donc un `hidden` de `validate()` serait
-annulé par le rendu suivant selon l'ordre. Un seul propriétaire rend la règle
-observable, donc testable.
-
-**Ce qui reste hors d'atteinte de toute correction de mise en page** : la barre
-d'adresse de Safari, et l'accessoire clavier d'iOS. La première ne s'ouvre pas —
-une application installée, lancée depuis l'écran d'accueil, n'a pas de barre
-d'adresse. La seconde disparaîtrait avec le `<form>` ; c'est un remède plausible,
-jamais vérifié ici, donc présenté comme **candidat** et non comme correctif.
+Ni `verify.py` ni les 312 assertions ne peuvent voir la mise en page : le
+faux DOM n'a pas de moteur de rendu, et une assertion qui dirait « le
+commentaire est sous le clavier » serait une assertion sur rien. Ce que les
+tests vérifient, c'est que l'application **réagit correctement à une mesure** ;
+les deux nombres sont posés à la main dans le test, et personne ne les calcule.
+Un test qui prétendrait mesurer la hauteur simulerait exactement le défaut
+qu'il est censé attraper. **Le vrai chiffre reste à produire sur l'appareil** —
+c'est ce que le bandeau est là pour.
 
 ### La touche retour du clavier
 
@@ -723,24 +601,6 @@ harnais voit bien ce que voit un navigateur.
 | rien n'est signalé hors du quiz | bandeau masqué |
 | le harnais voit les boutons dans la zone d'action | `_parent === actions` |
 | le harnais ne les voit plus dans l'écran de quiz | `_parent !== screen-quiz` |
-| le harnais voit le bouton des symboles dans le formulaire | `_parent === answer-form` |
-| le harnais voit le formulaire dans l'écran de quiz | `_parent === screen-quiz` |
-| le bouton des symboles bloque la prise de focus | `pointerdown` annulé, `click` non |
-| un débordement mesuré resserre l'écran | `data-compact="1"` |
-| resserré, l'écran tient et le bandeau se tait | 208 px pour 226 |
-| le mode reste posé tant que la question ne change pas | verrou |
-| le mode se repose à la question suivante | attribut retiré |
-| la barre se replie derrière un bouton en mode resserré | `hidden` croisés |
-| le repli reste une porte | un clic déploie, un autre referme |
-| le bandeau ne se compte pas lui-même | deux mesures, le même chiffre |
-| le bandeau nomme l'état mesuré | « avant reponse », « apres reponse » |
-| le bandeau ne promet pas un retour inexistant | pas de « lire le retour » avant |
-| le bandeau propose de refermer une barre déployée | « Refermez la barre » |
-| le bouton remesure sans qu'on le lui demande | bandeau mis à jour au clic |
-| la barre part avec la réponse | `hidden`, et le bouton avec |
-| le choix du joueur survit à la question | barre déployée à la suivante |
-| le choix est remis à zéro par une nouvelle série | `startQuiz()` |
-| le repli ne change rien à l'insertion | `SO` + `2` → `SO2` |
 
 Trente-quatre régressions ont été introduites puis vérifiées comme détectées : le
 focus volé par Suivant, le champ `disabled` après validation, le focus reporté
@@ -763,20 +623,7 @@ retirée, la garde hors série retirée, le champ ne remontant plus au document,
 l'écran de quiz ne remontant plus au document, et `doc.fire` sans
 `preventDefault`.
 
-Vingt et une de plus pour P6, le resserrement mesuré : le bandeau qui se
-compte lui-même, le mode compact absent, le mode rejoué à chaque mesure, la
-re-mesure supprimée, la barre qui survit à la réponse, la barre qui ne se replie
-jamais, le choix du joueur ignoré, le mode qui survit à la question, le choix
-qui survit à une série, le bandeau qui annonce toujours un retour, le remède qui
-promet un retour avant qu'il existe, le bouton qui ne remesure plus, le resserrement
-déclaré par une requête de hauteur, `--gap` laissé à sa valeur de base, `--pad`
-non réduit, le type de question conservé, le bouton de repli retiré du
-balisage, le bouton sans `aria-controls`, le bouton devenu `type="submit"`, et
-deux mutations du harnais — le bouton des symboles retiré du formulaire, le
-formulaire retiré de l'écran de quiz. **Vingt et une sur vingt et une
-détectées.**
-
-Et vingt-deux autres pour les correctifs de place, dont trois qui sont
+Vingt-deux de plus pour les correctifs de place, dont trois qui sont
 invisibles sans téléphone : Valider qui ne disparaît plus, `data-answered` qui
 n'est plus posé, Valider qui ne revient pas à la question suivante, la barre
 d'action en `sticky`, la barre d'action en `fixed`, la coque revenue en
@@ -798,45 +645,17 @@ une page où elle ne les voit plus. Rien ne pouvait le dire, parce qu'un
 C'est pour cela que les deux parentés sont désormais **assertionnées avant**
 d'affirmer quoi que ce soit sur la parade.
 
-Et le harnais de mutation lui-même a été repris dans la foulée, et il
-mentait sur sa propre sortie. Il classait « harnais cassé » toute mutation dont
-la sortie contenait le mot `Exception:` — et `run-tests.py` lève volontairement
-une exception **quand une assertion échoue**. Le mot apparaissait donc exactement
-dans les cas qu'il fallait déclarer réussis : le rapport annonçait onze mutants
-cascés là où il n'y en avait aucun.
+Et le harnais de mutation lui-même a été corrigé dans la foulée : il comptait
+seulement les assertions en échec, donc un mutant qui cassait le harnais — un
+échec bruyant — passait pour « non détecté ». Il distingue maintenant les
+trois issues : détecté par une assertion, détecté par un échec de harnais
+(trop brutal), et non détecté.
 
-Le discriminant n'est plus une recherche de mots mais la **ligne de résumé**,
-`N assertions réussies, M en échec`, que seul l'épilogue du fichier de test peut
-produire. Si elle est là, le harnais est allé au bout et c'est le compte de `M`
-qui tranche ; si elle manque, le mutant a cassé l'outillage avant qu'aucune
-assertion n'ait pu s'exprimer, et cela ne prouve rien sur la couverture. C'est
-pourquoi les deux classes sont **distinguées** et non confondues : un mutant qui
-fait tomber le harnais n'est pas une détection, c'est un trou.
+Trois de ces contrôles ont eux-mêmes eu besoin d'être repris, parce qu'ils
+passaient au vert sur du CSS absent :
 
-Deux des trois mutations que ce harnais ne voyait pas étaient **mes** erreurs,
-pas celles des tests. L'une remplaçait la condition de l'état mesuré par `false`
-— ce qui, contre toute attente, produisait exactement le texte que l'assertion
-demandait. L'autre ajoutait un commentaire au lieu de retirer l'appel, et ne
-changeait donc rien. Une mutation qui ne mute pas ne prouve pas que le test est
-faible ; elle prouve que la mutation était mauvaise. Le harnais vérifie désormais
-que chaque motif apparaît **une fois exactement**, avant d'exiger qu'un mutant
-soit vu.
-
-La troisième, elle, était un vrai trou : la branche « barre repliée, avant
-réponse » n'était affirmée nulle part. Les deux autres états l'étaient, et
-l'original — le remède qui annonçait un retour avant qu'il existe — passait
-entre les mailles. Deux assertions de plus, et il est fermé.
-
-**Quatre de ces contrôles ont eux-mêmes eu besoin d'être repris**, parce qu'ils
-passaient au vert sur du CSS absent, c'est-à-dire ne pouvaient pas échouer :
-
-- une recherche de texte enchaînait la queue d'un sélecteur au corps de la règle
-  **suivante** ; les règles sont désormais parsées en `{selecteur: corps}` ;
-- la requête de média sur la hauteur était cherchée dans le **corps** du bloc,
-  et sa **condition** est avant l'accolade : `(max-height: 460px)` lui échappait
-  donc entièrement. Le contrôle ne pouvait rien voir — la feuille pouvait
-  contenir exactement la requête interdite. Il lit désormais l'at-rule en
-  entier ;
+- une recherche de texte enchaînait la queue d'un sélecteur au corps de la
+  règle **suivante** ; les règles sont désormais parsées en `{selecteur: corps}`;
 - la valeur de `--safe-bottom` n'était pas vérifiée, seulement son nom —
   `--safe-bottom: 34px` cite la variable et ne rend pas un pixel ;
 - une comparaison à un nom écrit en dur (`screen == "keyboard"`) avait dérivé
@@ -855,23 +674,16 @@ hauteur. Il ne peut pas garantir deux choses que seul un téléphone tranche :
   qui est le geste que le navigateur reconnaît sans ambiguïté.
 - que l'énoncé, le champ et Valider tiennent ensemble à l'écran une fois le
   clavier levé. **C'était le calcul du CSS, et il était faux** : les 469 px ne
-  décrivaient que l'état avant réponse, et l'état après réponse demande
-  davantage. Un iPhone 15 Pro a refusé le calcul, et le commentaire comme le
-  bouton Suivant ont disparu. La mesure de l'appareil a ensuite montré que le
-  problème n'était pas la mise en page mais le **contenu** : 324 px pour 210 px
-  visibles, dont 116 pour la seule barre de symboles. P1 à P5 ont réglé la
-  structure, P6 fait ce qui restait : la barre part avec la réponse, se replie
-  avant, et l'appareil décide du resserrement en mesurant.
-  Ce qui reste hors d'atteinte : **Valider et Suivant restent visibles**
-  (`.actions` est un enfant de la coque, donc au bas de la zone visible quoi
-  qu'il arrive du contenu), mais l'énoncé et le champ demandent désormais un
-  défilement sur un écran plus étroit que 402 px, et le bandeau le dit au lieu
-  de le cacher. C'est le compromis assumé : rendre la barre de symboles à une
-  touche en vaut la place, mais pas toujours.
-- que la barre d'adresse de Safari disparaisse. Elle ne s'ouvre pas : seule
-  l'application installée (*voir* « Lancer l'application installée, et non un
-  onglet ») en est dépourvue. Les 210 px ont été mesurés **dans un onglet**,
-  donc c'est le pire cas.
+  décrivaient que l'état avant réponse, et l'état après réponse demande jusqu'à
+  601 px pour les 508 px annoncés. Un iPhone 15 Pro l'a refusé, et le
+  commentaire comme le bouton Suivant ont disparu. Le calcul a été remplacé
+  par `mesurerDebordement()`, qui lit les hauteurs **sur l'appareil** et
+  n'affiche un bandeau que s'il déborde. Le nombre à crediter est donc celui
+  que le téléphone affichera, pas celui de cette page.
+  L'action, elle, n'est plus soumise à la question : `.actions` est un enfant
+  de la coque, donc au bas de la zone visible quoi qu'il arrive du contenu.
+  Seule la **lecture du commentaire** peut demander un défilement, et c'est
+  sans gravité — c'est ce que dit le bandeau quand il apparaît.
 - que le système retire ou non le focus du champ quand il valide une
   correction. Le filet de sécurité de la touche retour rend la question sans
   importance, mais il ne peut pas être vérifié ici : aucun faux DOM ne simule
@@ -1106,14 +918,6 @@ signalée comme masquant le bas de l'écran ne peut pas exister dans l'applicati
 installée. Sa présence indiquait qu'on testait un onglet, et elle a mangé une
 partie du budget vertical que le CSS ne comptait pas.
 
-**Cela vaut aussi pour la mesure de 324 px pour 210 px** : elle a été prise
-dans un onglet. Les 210 px sont donc le **pire cas**, et l'application installée
-rendra au moins 49 px de plus, soit 259. Le budget de `make budget` n'a pas à
-être ajusté : il se déduit d'une hauteur *visible* mesurée, et c'est cette
-mesure-là qu'il faut refaire sur l'application avant d'en tirer une conclusion.
-Ce qui ne change pas en passant à l'application installée, en revanche, c'est
-l'accessoire clavier d'iOS, qui existe dans les deux cas.
-
 ---
 
 ## Limites connues
@@ -1137,17 +941,6 @@ qui reste, et elle ne se lève qu'avec un téléphone.
 `tools/check-js.py` est un analyseur lexical, pas un parseur. Il distingue
 regex et division par heuristique sur le caractère précédent : il peut se
 tromper sur du JavaScript exotique, ce qui n'apparaît pas ici.
-
-`tools/budget.py` lit les hauteurs **dans le CSS**, mais il ne mesure rien : la
-largeur de l'écran et la place visible sont des paramètres, et ses deux seules
-hypothèses sont dites dans le fichier. La première est `ratio = 0.5`, la largeur
-moyenne d'un caractère exprimée en em, qui sert à plier le plus long
-commentaire ; elle est exposée en paramètre pour être corrigée contre un
-appareil réel plutôt que changée en douce. La seconde est qu'un énoncé tient
-sur une ligne — vrai pour les 62 éléments, 20 ions et leurs formules, puisque ce
-sont des noms et des symboles, et vérifié dans `data.js`. Si un jour un énoncé
-tenait sur deux, le budget serait faux **par construction** et le tableau le
-dirait, ce qui vaut mieux que le contraire.
 
 `tools/tests/dom-stub.js` déclare les touches de la barre de symboles à la
 main : c'est un miroir maintenance de `index.html`, donc une source de dérive.

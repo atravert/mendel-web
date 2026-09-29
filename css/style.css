@@ -182,81 +182,33 @@ html[data-screen='quiz'] .actions { display: flex; }
 html[data-answered='1'] .question-type,
 html[data-answered='1'] .prompt { display: none; }
 
-/* Budget vertical de l'ecran de quiz. Cette fois, MESURE.
+/* Budget vertical de l'ecran de quiz, en min-heurs du CSS: 20 de marge
+   haute, 59 d'encoche, 4 intervalles de 16, 22 de progression, 20 de type,
+   53 d'enonce, 48 de champ, 104 de barre, 12 de marge, 48 de bouton, 20 de
+   marge basse, soit 469 px AVANT reponse.
 
-   Les versions precedentes de ce commentaire annoncaient 469 px de contenu
-   pour 508 px disponibles sur un iPhone 15, et en deduisaient que tout tenait.
-   Les deux chiffres etaient CALCULES, et un iPhone 15 Pro les a refuses: le
-   commentaire et le bouton Suivant ont disparu de l'ecran. Le 469 px ne
-   decrivait en outre que l'etat AVANT reponse.
+   La version precedente de ce commentaire annoncait 469 px de contenu pour
+   508 px disponibles sur un iPhone 15, et en deduisait que tout tenait a
+   l'ecran. Les deux chiffres avaient le meme defaut: ils etaient CALCULES,
+   jamais MESURES. Et le 469 px ne decrivait que l'etat AVANT reponse -- or
+   les deux elements qui dependent, le commentaire et le bouton Suivant,
+   n'existent qu'apres, et ils etaient les deux derniers du flux, donc les
+   deux premiers a sortir:
 
-   Ce que l'appareil a reellement rapporte sur la serie ions, avec le clavier
-   ouvert, dans un onglet Safari:
+       avant reponse    468 px
+       apres reponse   555 px (commentaire sur une ligne) a 601 px (sur
+                       trois, ce qui est le cas d'une mauvaise reponse: le
+                       retour ajoute "La bonne reponse etait : ...")
 
-       324 px de contenu pour 210 px visibles
+   Le 508 px ne pouvait donc pas tenir: deficit de 47 a 93 px, SANS compter
+   un pixel de barre Safari. Un iPhone 15 Pro a refuse le calcul, et le
+   commentaire comme le bouton Suivant ont disparu de l'ecran.
 
-   324 se decompose EXACTEMENT, et chaque terme se lit tel quel dans cette
-   feuille:
-
-       22  .progress-row, --progress-h
-        1  .rule
-       20  .question-type, 14 x 1.45
-       53  .prompt, clamp(30, 11vw, 44) = 44, x 1.2
-       48  .answer-input, --tap
-      116  .symbol-bar, 12 + 48 + 8 + 48
-       64  quatre intervalles de --gap
-       ---
-      324
-
-   Deux Consequences, et la premiere etait un defaut de mon propre diagnostic:
-
-   1. C'est l'etat AVANT reponse. Le bandeau annoncait pourtant "Defilez
-      pour lire le retour" -- alors qu'il n'y a aucun retour a lire, et que
-      c'est le CHAMP qui deborde. Le message decrivait un autre etat que le
-      sien.
-
-   2. Le 210 px est lu AVANT que le bandeau ne s'affiche, et il en a donc
-      ete a son tour augmente: le bandeau est enfant de la coque, il prend sa
-      place sur celle de l'ecran, et toute mesure ulterieure le lit en
-      deduction. Un diagnostic qui s'ajoute au defaut qu'il mesure rapportait
-      114 px la ou il y en avait 44. `mesurerDebordement()` le masque donc
-      maintenant avant de mesurer.
-
-   Sur ces 210 px, la barre de symboles en prenait 116: plus de la moitie.
-   La reparer tient en deux gestes, et le tableau ci-dessous est CALCULE par
-   `make budget` a partir de cette feuille -- pas recopie. Il ne peut donc pas
-   redevenir faux en silence quand une valeur change.
-
-       BUDGET-CALCULE
-       normal / avant reponse       324   5
-       normal / apres reponse       203   4
-       compact / avant reponse      208   4
-       compact / apres reponse      179   4
-       compact / barre deployee     264   4
-       FIN-BUDGET
-
-   Colonnes: hauteur de contenu en px, puis nombre d'elements RENDUS. Les
-   intervalles se comptent entre elements rendus, pas entre elements du
-   balisage: un element masque sort du flux, et son intervalle avec.
-
-   Le premier nombre est ce que l'appareil a dit, et l'outil le retrouve tout
-   seul. Les 203 px du deuxieme en etaient 263: ce sont les 116 de la barre,
-   qui part avec la reponse parce qu'on ne compose plus rien. Le 264 du dernier
-   est le seul budget qui deborde, et c'est celui que le JOUEUR a choisi en
-   redeployant la barre. Il deborde, il le dit, et on peut le refermer: c'est un
-   choix, pas un defaut.
-
-   Ce qui reste hors d'atteinte de toute correction de mise en page: la barre
-   d'adresse de Safari, et l'accesoire clavier d'iOS. La premiere ne
-   s'ouvre pas -- une application installee, c'est-a-dire lancee depuis
-   l'ecran d'accueil, n'a pas de barre d'adresse. La seconde disparaitrait
-   avec le `<form>`; c'est un remede plausible, jamais verifie ici, donc
-   presente comme candidat et non comme correctif.
-
-   La zone d'action reste enfant de la coque, donc au bas de la zone visible
-   quelle que soit la hauteur: c'est elle qui rend Valider et Suivant
-   atteignables meme quand le reste deborde. Le reste defile. Voir P1, P3, P5
-   et P6 dans le README. */
+   On ne retente pas le calcul. La zone d'action est enfant de la coque, donc
+   au bas de la zone visible quelle que soit la hauteur reellement disponible;
+   le reste defile. S'il reste un debordement, il est AFFICHE par l'appareil
+   lui-meme (#overflow-note) au lieu d'etre devine ici. Voir P1, P3 et P5 dans
+   le README. */
 
 /* Centrage par marges automatiques sur le premier et le dernier enfant, et
    non par `justify-content: center`. Les deux centrent; un seul rend le
@@ -294,10 +246,8 @@ html[data-answered='1'] .prompt { display: none; }
 #screen-quiz > :last-child { margin-block: 0; }
 
 /* Clavier ouvert: l'indicateur d'accueil est dessous, sa marge est du vide.
-
-   Ce que ces 34 px font tient tient EN PLUS de ce qui tenait deja -- pas a
-   eux seuls. Ils ne sont plus justifies par un calcul, qui s'est revele faux,
-   mais par le fait qu'ils ne servent a rien sous le clavier. */
+   Les 34 px gagnes font tenir l'enonce, le champ et Valider ensemble sur un
+   iPhone 15, la ou il manquait 5 px. */
 html[data-keyboard='open'] { --safe-bottom: 0px; }
 
 /* --------------------------------------------------------------------------
@@ -489,85 +439,13 @@ html[data-screen='quiz'] .sound-toggle {
   opacity: 0.6;
 }
 
-/* Mode compact: ce qui ne rentre pas, on le retrecit.
-
-   Declenche par l'APPAREIL, jamais par un seuil devine. `mesurerDebordement()`
-   constate un debordement reel -- `scrollHeight` contre `clientHeight`, mesure
-   sur la machine qui echoue -- et pose alors `data-compact`. Aucun nombre
-   n'est invente ici, donc rien ne peut etre faux: un telephone qui a la
-   place ne se compacte pas, et un telephone a l'etroit se compacte.
-
-   Ce qui rendrait le declenchement par la hauteur Impossible: sur iOS le
-   viewport de MISE EN PAGE ne retrecit pas quand le clavier se leve. Une
-   requete `@media (max-height: 460px)` y verrait toujours 844 px, donc ne se
-   declencherait jamais -- exactement comme `interactive-widget=resizes-content`,
-   qui n'existe que sur Chrome. C'est le meme piege, et il a deja couté la
-   mise en page une fois. Aucune requete de hauteur, donc: le verdict vient
-   d'une mesure.
-
-   Les quatre leviers, et ce que chacun rend, mesure contre mesure:
-
-       --gap  16 -> 8    quatre intervalles de l'ecran de quiz     -32 px
-       --pad  20 -> 12   la marge de la coque, deux fois           -16 px
-       .question-type    une ligne qui ne dit rien de la reponse   -28 px
-       barre de symboles deux rangees derriere un bouton           -68 px
-
-   Les deux premiers sont des variables, donc tout ce qui les lit suit: la
-   marge de la coque, mais aussi le centrage de l'icone du son, qui lit la
-   MEME `var(--pad)` et bouge donc avec la ligne de progression qu'elle
-   centre. Les deux leviers CSS qu'on ne voit pas a l'ecran ne peuvent pas
-   diverger, parce qu'ils n'ont qu'une seule valeur.
-
-   Ce que le mode compact ne fait PAS: il ne touche ni la hauteur du champ, ni
-   celle des boutons, ni la police de l'enonce. Ce sont les 48 px qui restent
-   sous le doigt, et un enonce illisible n'est pas un enonce.
-
-   Il rend aussi de la place a la ligne de retour, sans le vouloir: 16 px de
-   largeur de plus pour un texte qui se replie sur lui-meme. Les 203 px
-   "apres reponse" du tableau plus haut en viennent en partie.
-
-   Le resultat est dans ce tableau: 208 px pour 226. Il reste 18 px, et ce
-   n'est pas une marge de securite -- c'est le surplus reel de cet etat-la.
-   Sur un appareil plus etroit il serait moindre, et le bandeau le dirait
-   plutot que de le cacher -- c'est lui, le diagnostic, et c'est lui qui a
-   produit la mesure qui declenche tout cela. */
-html[data-compact='1'] {
-  --gap: 8px;
-  --pad: 12px;
-}
-
-html[data-compact='1'] .question-type { display: none; }
-
-/* Barre de symboles, rangee des signes puis rangee des chiffres. */
+/* Barre de symboles pour composer une formule au doigt. Deux rangees: les
+   signes, puis les chiffres. */
 .symbol-bar {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 12px;
-}
-
-/* Le bouton qui la deroule. 48 px, comme toutes les autres touches, parce
-   qu'il ne sert qu'en mode compact -- et qu'il est alors le seul acces a
-   `+`, `-` et `^`, dont le clavier systeme ne propose aucun. */
-.symbol-toggle {
-  display: block;
-  width: 100%;
-  min-height: var(--tap);
-  margin-top: 12px;
-  padding: 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 16px;
-  cursor: pointer;
-  touch-action: manipulation;   /* supprime le delai de 300 ms au tap */
-}
-
-.symbol-toggle[aria-expanded='true'] {
-  border-color: var(--primary);
-  color: var(--primary);
 }
 
 .symbol-row {
